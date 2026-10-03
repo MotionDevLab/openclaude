@@ -354,15 +354,20 @@ describe('cli.tsx — --provider startup ordering', () => {
     expect(process.env.GEMINI_MODEL).toBe('gemini-2.0-flash')
   })
 
-  it('loads the settings-default provider env file at settings tier (before profile routing)', async () => {
+  it('loads the settings-default provider env file before settings apply and profile routing', async () => {
     const src = await Bun.file(`${import.meta.dir}/cli.tsx`).text()
-    const settingsApplyIndex = src.indexOf('applySafeConfigEnvironmentVariables()')
+    const enableConfigsIndex = src.indexOf('enableConfigs()')
     const defaultFileIndex = src.indexOf('resolveDefaultProviderEnvFile(')
+    const settingsApplyIndex = src.indexOf('applySafeConfigEnvironmentVariables()')
     const explicitReapplyIndex = src.indexOf('reapplyExplicitProviderInputs()')
     const profileApplyIndex = src.indexOf('await applyStartupEnvFromProfile')
 
-    expect(settingsApplyIndex).toBeGreaterThanOrEqual(0)
-    expect(defaultFileIndex).toBeGreaterThan(settingsApplyIndex)
+    // Order: configs → default file (fills shell gaps) → settings env
+    // (overwrites file on collision) → explicit reapply (always wins) →
+    // saved-profile merge (yields to the file's complete selection).
+    expect(enableConfigsIndex).toBeGreaterThanOrEqual(0)
+    expect(defaultFileIndex).toBeGreaterThan(enableConfigsIndex)
+    expect(settingsApplyIndex).toBeGreaterThan(defaultFileIndex)
     // Explicit flags are reapplied after the default load and always win:
     // resolveDefaultProviderEnvFile returns null for explicit invocations.
     expect(explicitReapplyIndex).toBeGreaterThan(defaultFileIndex)
