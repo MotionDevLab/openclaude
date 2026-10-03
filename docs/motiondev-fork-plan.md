@@ -86,10 +86,7 @@ Touch points (source paths in fork):
   active lane through the same lookup so banner, `/provider`, and `/model`
   show the custom label. Saved-profile flow (`OpenRouter (active)`,
   Anthropic built-in) is untouched; env-file/flag lanes resolve via the
-  new lookup. **v1 scope: label-when-active only** — custom lanes are NOT
-  added as switchable entries in the `/provider` menu (switching lanes
-  still means relaunch with different env/model). Menu switching is a
-  §8 follow-up.
+  new lookup. (Menu switching of custom lanes is §3.4, not here.)
 - **Validation & secrets** — invalid entry (bad id, empty label,
   unparseable baseUrl) fails loudly at startup naming entry + field.
   No `apiKey` field on entries by design: secrets stay in env files /
@@ -117,8 +114,13 @@ Mechanism (verified in source — no new wire format invented):
   allowlist. Note: when endpoint metadata exists and denies reasoning
   (`resolveModelReasoningControl` early-returns ~lines 614–619), neither
   tier overrides nor this entry apply — correct precedence, document it.
-- Existing tier env overrides keep working unchanged (they are evaluated
-  in the same chain; explicit tier pin wins on conflict — document this).
+- Existing tier env overrides keep working unchanged, with explicit
+  precedence (implementation MUST encode exactly this order inside the
+  extended function): tier override `=== false` → not controllable, return
+  undefined (explicit tier pin wins, even over a matching entry);
+  else tier `=== true` → existing controllable resolution;
+  else matched entry with `supportsEffort: true` → entry resolution;
+  else undefined. Document this chain.
 - **Memoization**: `get3PModelCapabilityOverride` memoizes on env vars
   only. The settings-based entry lookup must join the memo cache key
   (or bypass memoization) so settings edits take effect; settings are
@@ -226,7 +228,7 @@ when unset."):
   `src/commands/provider/provider.test.tsx`,
   `src/commands/model/model.test.tsx`, `src/entrypoints/cli.test.ts`
   (extend with: default-env-file load order, explicit-flag-wins cases),
-  `src/components/ProviderManager` tests (custom entries listed,
+  `src/components/ProviderManager.test.tsx` (custom entries listed,
   activation builds entry env and calls the session-apply path).
 - `bun run build` + `bun run smoke` clean.
 - Repo pre-push contract per `CONTRIBUTING.md` before any push.
@@ -274,7 +276,8 @@ when unset."):
 - Author gap-hunt + source re-check (chain order in `effort.ts`
   ~lines 602–646, load order in `cli.tsx` ~402–462, allowlists in
   `managedEnvConstants.ts`): incorporated above.
-- Laya second opinion (`laya-typed-decisions`, `--predict --json`):
+- Laya second opinion (local `laya` CLI, english checkpoint
+  `convaiinnovations/laya`, `--predict --json`):
   effort mechanism `extend-tier-override-function` (0.76),
   env-file tier `settings-tier-below-explicit-flags` (0.68),
   label mechanism `check-custom-first-in-label-fn` (0.68),
