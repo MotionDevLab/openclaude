@@ -591,7 +591,7 @@ async function loadModelDiscoveryContext(): Promise<ModelDiscoveryContext | null
       }),
       profileModelSurface,
       routeId: legacyRouteId,
-      routeLabel: getLocalOpenAICompatibleProviderLabel(baseUrl),
+      routeLabel: getLocalOpenAICompatibleProviderLabel(baseUrl, process.env.OPENAI_MODEL),
     }
   }
 

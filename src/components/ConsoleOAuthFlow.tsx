@@ -518,7 +518,7 @@ function OAuthStatusMessage({
                   } else {
                     saved = addProviderProfile(
                       {
-                        name: getLocalOpenAICompatibleProviderLabel(envBaseUrl),
+                        name: getLocalOpenAICompatibleProviderLabel(envBaseUrl, envModel as string),
                         baseUrl: envBaseUrl as string,
                         model: envModel as string,
                         apiKey: envApiKey,

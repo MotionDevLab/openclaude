@@ -453,11 +453,65 @@ export async function main(
     enableConfigs()
   }
 
+  // providerEnvFile (settings default): plain `openclaude` boots the
+  // configured lane with zero typing. Loads BEFORE settings.env and the
+  // saved-profile application below, via the same loadEnvFile (same
+  // allowlist; only fills unset keys): settings `env` overwrites file
+  // values on collision (settings wins), explicit `--provider-env-file` /
+  // `--provider` values were remembered above and are reapplied after
+  // every merge (explicit always wins). A complete lane selection from the
+  // file (flag + base URL + model) makes the saved-profile application
+  // yield via its explicit-intent gate, so the configured lane — not a
+  // stale saved profile — reaches the startup profile merge, which itself
+  // prefers shell values. Skipped entirely when an explicit
+  // --provider-env-file was given.
+  {
+    const { getSettings_DEPRECATED } = await import(
+      '../utils/settings/settings.js'
+    )
+    const { loadEnvFile, resolveDefaultProviderEnvFile } = await import(
+      '../utils/envFile.js'
+    )
+    const resolved = resolveDefaultProviderEnvFile(
+      args,
+      (getSettings_DEPRECATED() as { providerEnvFile?: unknown } | null)?.providerEnvFile,
+    )
+    if (resolved) {
+      try {
+        loadEnvFile(resolved)
+      } catch (err: unknown) {
+        // biome-ignore lint/suspicious/noConsole:: intentional error output
+        console.error(err instanceof Error ? err.message : String(err))
+        process.exit(1)
+      }
+    }
+  }
+
   // Apply settings.env from user settings (includes GitHub provider settings from /onboard-github)
   {
     const { applySafeConfigEnvironmentVariables } =
       await importers.managedEnv()
     applySafeConfigEnvironmentVariables()
+  }
+
+  // customProviders: fail loudly at startup naming entry + field. Settings
+  // are loaded by now (enableConfigs above); an invalid lane would otherwise
+  // silently fall through to generic labels and defaults.
+  {
+    const { getSettings_DEPRECATED } = await import(
+      '../utils/settings/settings.js'
+    )
+    const { validateCustomProviders } = await import(
+      '../utils/customProviders.js'
+    )
+    const problems = validateCustomProviders(
+      (getSettings_DEPRECATED() as { customProviders?: unknown } | null)?.customProviders,
+    )
+    if (problems.length > 0) {
+      // biome-ignore lint/suspicious/noConsole:: intentional error output
+      console.error(`Invalid customProviders in settings.json:\n- ${problems.join('\n- ')}`)
+      process.exit(1)
+    }
   }
   reapplyExplicitProviderInputs()
 

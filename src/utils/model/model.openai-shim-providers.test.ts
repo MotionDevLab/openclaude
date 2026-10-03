@@ -14,6 +14,28 @@ import {
   clearPluginSettingsBase,
   resetSettingsCache,
 } from '../settings/settingsCache.js'
+import * as actualSettings from '../settings/settings.js'
+import type { SettingsJson } from '../settings/types.js'
+
+// Gated customProviders override for the lane small-model tests below.
+// mock.module is process-wide and mock.restore() does NOT undo it, so the
+// mock delegates to the real settings implementation whenever no test sets
+// the flag (same pattern as providerDiscovery.test.ts).
+const realSettings = { ...actualSettings }
+let activeCustomProvidersOverride: SettingsJson['customProviders'] | null = null
+
+mock.module('../settings/settings.js', () => ({
+  ...realSettings,
+  getSettings_DEPRECATED: () => {
+    if (!activeCustomProvidersOverride) {
+      return realSettings.getSettings_DEPRECATED()
+    }
+    return {
+      ...(realSettings.getSettings_DEPRECATED() ?? {}),
+      customProviders: activeCustomProvidersOverride,
+    }
+  },
+}))
 let allowedModels: Set<string> | undefined
 
 async function importFreshModelModule() {
@@ -84,6 +106,7 @@ const SAVED_ENV = {
   API_ROUTE_MODEL: process.env.API_ROUTE_MODEL,
   OPENAI_MODEL: process.env.OPENAI_MODEL,
   OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
+  ANTHROPIC_SMALL_FAST_MODEL: process.env.ANTHROPIC_SMALL_FAST_MODEL,
   CODEX_API_KEY: process.env.CODEX_API_KEY,
   CHATGPT_ACCOUNT_ID: process.env.CHATGPT_ACCOUNT_ID,
   ANTHROPIC_DEFAULT_OPUS_MODEL: process.env.ANTHROPIC_DEFAULT_OPUS_MODEL,
@@ -148,6 +171,8 @@ beforeEach(async () => {
   delete process.env.API_ROUTE_MODEL
   delete process.env.OPENAI_MODEL
   delete process.env.OPENAI_BASE_URL
+  delete process.env.ANTHROPIC_SMALL_FAST_MODEL
+  activeCustomProvidersOverride = null
   delete process.env.CODEX_API_KEY
   delete process.env.CHATGPT_ACCOUNT_ID
   delete process.env.ANTHROPIC_DEFAULT_OPUS_MODEL
@@ -179,6 +204,7 @@ afterEach(async () => {
     for (const key of Object.keys(SAVED_ENV) as Array<keyof typeof SAVED_ENV>) {
       restoreEnv(key)
     }
+    activeCustomProvidersOverride = null
     saveGlobalConfig(current => ({
       ...current,
       model: savedModel,
@@ -332,6 +358,60 @@ test('getSmallFastModel returns OPENAI_MODEL for Xiaomi MiMo', async () => {
 
   const { getSmallFastModel } = await importFreshModelModule()
   expect(getSmallFastModel()).toBe('mimo-v2-flash')
+})
+
+test('getSmallFastModel prefers the matched customProviders smallModel', async () => {
+  activeCustomProvidersOverride = [
+    {
+      id: 'zen-router',
+      label: 'OpenCode Zen Router',
+      baseUrl: 'http://127.0.0.1:18905/zen/v1',
+      smallModel: 'nemotron-3.5-lightning-free',
+    },
+  ]
+  process.env.CLAUDE_CODE_USE_OPENAI = '1'
+  process.env.OPENAI_BASE_URL = 'http://127.0.0.1:18905/zen/v1'
+  process.env.OPENAI_MODEL = 'muse-spark-1.3-contributor-free'
+  // The lane entry wins over the env chain, not the other way around.
+  process.env.ANTHROPIC_SMALL_FAST_MODEL = 'env-small-model'
+
+  const { getSmallFastModel } = await importFreshModelModule()
+  expect(getSmallFastModel()).toBe('nemotron-3.5-lightning-free')
+})
+
+test('getSmallFastModel falls through when the lane declares no smallModel', async () => {
+  activeCustomProvidersOverride = [
+    {
+      id: 'zen-router',
+      label: 'OpenCode Zen Router',
+      baseUrl: 'http://127.0.0.1:18905/zen/v1',
+    },
+  ]
+  process.env.CLAUDE_CODE_USE_OPENAI = '1'
+  process.env.OPENAI_BASE_URL = 'http://127.0.0.1:18905/zen/v1'
+  process.env.OPENAI_MODEL = 'muse-spark-1.3-contributor-free'
+
+  const { getSmallFastModel } = await importFreshModelModule()
+  expect(getSmallFastModel()).toBe('muse-spark-1.3-contributor-free')
+})
+
+test('getSmallFastModel ignores lane entries off OpenAI-shim providers', async () => {
+  activeCustomProvidersOverride = [
+    {
+      id: 'local-proxy',
+      label: 'Local Proxy',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      smallModel: 'lane-small-model',
+    },
+  ]
+  // First-party session with stale OpenAI env: the mocked getAPIProvider
+  // reports firstParty without CLAUDE_CODE_USE_* flags.
+  process.env.OPENAI_BASE_URL = 'http://127.0.0.1:11434/v1'
+  process.env.OPENAI_MODEL = 'stale-model'
+  process.env.ANTHROPIC_SMALL_FAST_MODEL = 'env-small-model'
+
+  const { getSmallFastModel } = await importFreshModelModule()
+  expect(getSmallFastModel()).toBe('env-small-model')
 })
 
 test('getDefaultOpusModel returns OPENAI_MODEL for MiniMax', async () => {

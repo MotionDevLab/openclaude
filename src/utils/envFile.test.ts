@@ -10,6 +10,8 @@ import {
   parseProviderEnvFileArgs,
   reapplyRememberedEnvFileValues,
   rememberLoadedEnvFileValues,
+  resolveDefaultProviderEnvFile,
+  resolveProviderEnvFilePath,
 } from './envFile.js'
 
 const TEST_ENV_KEYS = [
@@ -598,5 +600,97 @@ describe('parseProviderEnvFileArgs', () => {
     ])
 
     expect(result).toEqual({ paths: [] })
+  })
+})
+
+describe('resolveProviderEnvFilePath', () => {
+  it('expands a leading ~ to the home dir', async () => {
+    const { homedir } = await import('node:os')
+    const { join } = await import('node:path')
+
+    expect(resolveProviderEnvFilePath('~/.openclaude/providers/zen.env')).toBe(
+      join(homedir(), '.openclaude/providers/zen.env'),
+    )
+    expect(resolveProviderEnvFilePath('~')).toBe(homedir())
+  })
+
+  it('resolves relative paths against the OpenClaude config dir', async () => {
+    const { getClaudeConfigHomeDir } = await import('./envUtils.js')
+    const { join } = await import('node:path')
+
+    expect(resolveProviderEnvFilePath('providers/zen.env')).toBe(
+      join(getClaudeConfigHomeDir(), 'providers/zen.env'),
+    )
+    expect(resolveProviderEnvFilePath('providers/zen.env', '/tmp/cfg')).toBe(
+      join('/tmp/cfg', 'providers/zen.env'),
+    )
+  })
+
+  it('passes absolute paths through', () => {
+    const absolute =
+      process.platform === 'win32' ? 'C:\\zen\\zen.env' : '/etc/zen/zen.env'
+
+    expect(resolveProviderEnvFilePath(absolute)).toBe(absolute)
+  })
+})
+
+describe('resolveDefaultProviderEnvFile', () => {
+  it('returns null when an explicit --provider-env-file was given', () => {
+    expect(
+      resolveDefaultProviderEnvFile(
+        ['--provider-env-file', '/tmp/other.env'],
+        '~/.openclaude/providers/zen.env',
+      ),
+    ).toBeNull()
+  })
+
+  it('returns null when the setting is absent or blank', () => {
+    expect(resolveDefaultProviderEnvFile([], undefined)).toBeNull()
+    expect(resolveDefaultProviderEnvFile([], '   ')).toBeNull()
+    expect(resolveDefaultProviderEnvFile([], 42)).toBeNull()
+  })
+
+  it('resolves the settings value otherwise', async () => {
+    const { homedir } = await import('node:os')
+    const { join } = await import('node:path')
+
+    expect(
+      resolveDefaultProviderEnvFile([], '~/.openclaude/providers/zen.env'),
+    ).toBe(join(homedir(), '.openclaude/providers/zen.env'))
+  })
+})
+
+describe('settings-default env file collision', () => {
+  it('fills gaps only: settings env wins on collision', () => {
+    const filePath = writeTempEnvFile([
+      'CLAUDE_CODE_USE_OPENAI=1',
+      'OPENAI_BASE_URL=http://127.0.0.1:18905/zen/v1',
+      'OPENAI_MODEL=file-model',
+    ].join('\n'))
+
+    // Settings `env` applies first (same tier as the default file).
+    process.env.OPENAI_MODEL = 'settings-model'
+    const loaded = loadEnvFile(filePath)
+
+    expect(process.env.CLAUDE_CODE_USE_OPENAI).toBe('1')
+    expect(process.env.OPENAI_BASE_URL).toBe('http://127.0.0.1:18905/zen/v1')
+    // Collision: the settings value is kept, the file fills gaps only.
+    expect(process.env.OPENAI_MODEL).toBe('settings-model')
+    expect(loaded.OPENAI_MODEL).toBeUndefined()
+  })
+
+  it('missing default file is a hard error naming the resolved path', () => {
+    const resolved = resolveProviderEnvFilePath('providers/does-not-exist.env')
+
+    let message = ''
+    try {
+      loadEnvFile(resolved)
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error)
+    }
+
+    expect(message).toContain(
+      `Failed to load --provider-env-file at ${resolved}:`,
+    )
   })
 })

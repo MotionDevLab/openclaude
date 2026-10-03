@@ -5,6 +5,29 @@ import {
   releaseSharedMutationLock,
 } from '../test/sharedMutationLock.js'
 import { asMockFetch } from '../test/typedMocks.js'
+import * as actualSettings from './settings/settings.js'
+import type { SettingsJson } from './settings/types.js'
+
+// Snapshot the real settings module before mocking. bun's mock.module is
+// process-wide and mock.restore() does NOT undo it, so install the mock ONCE
+// here, gated on a flag, and delegate to the real implementation whenever a
+// custom-providers test is not actively running. afterEach clears the flag so
+// the persisted mock is a transparent passthrough for every other suite.
+const realSettings = { ...actualSettings }
+let activeCustomProvidersOverride: SettingsJson['customProviders'] | null = null
+
+mock.module('./settings/settings.js', () => ({
+  ...realSettings,
+  getSettings_DEPRECATED: () => {
+    if (!activeCustomProvidersOverride) {
+      return realSettings.getSettings_DEPRECATED()
+    }
+    return {
+      ...(realSettings.getSettings_DEPRECATED() ?? {}),
+      customProviders: activeCustomProvidersOverride,
+    }
+  },
+}))
 
 async function loadProviderDiscoveryModule() {
   return import(`./providerDiscovery.js?ts=${Date.now()}-${Math.random()}`)
@@ -32,6 +55,7 @@ afterEach(() => {
     mock.restore()
     globalThis.fetch = originalFetch
     restoreEnv('OPENAI_BASE_URL')
+    activeCustomProvidersOverride = null
   } finally {
     releaseSharedMutationLock()
   }
@@ -155,6 +179,42 @@ test('falls back to a generic local openai-compatible label', async () => {
   expect(
     getLocalOpenAICompatibleProviderLabel('http://127.0.0.1:8080/v1'),
   ).toBe('Local OpenAI-compatible')
+})
+
+test('customProviders entries win over built-in heuristics', async () => {
+  activeCustomProvidersOverride = [
+    { id: 'my-lane', label: 'My Lane', baseUrl: 'http://localhost:1234/v1' },
+  ]
+  const { getLocalOpenAICompatibleProviderLabel } =
+    await loadProviderDiscoveryModule()
+
+  // localhost:1234 is the LM Studio default port — the custom entry wins.
+  expect(
+    getLocalOpenAICompatibleProviderLabel('http://localhost:1234/v1'),
+  ).toBe('My Lane')
+  expect(
+    getLocalOpenAICompatibleProviderLabel('http://localhost:1234/v1', 'some-model'),
+  ).toBe('My Lane')
+})
+
+test('customProviders model mismatch falls through to built-in heuristics', async () => {
+  activeCustomProvidersOverride = [
+    {
+      id: 'my-lane',
+      label: 'My Lane',
+      baseUrl: 'http://localhost:1234/v1',
+      models: ['only-this-model'],
+    },
+  ]
+  const { getLocalOpenAICompatibleProviderLabel } =
+    await loadProviderDiscoveryModule()
+
+  expect(
+    getLocalOpenAICompatibleProviderLabel('http://localhost:1234/v1', 'only-this-model'),
+  ).toBe('My Lane')
+  expect(
+    getLocalOpenAICompatibleProviderLabel('http://localhost:1234/v1', 'other-model'),
+  ).toBe('LM Studio')
 })
 
 test('ollama generation readiness reports unreachable when tags endpoint is down', async () => {

@@ -78,6 +78,7 @@ import {
   getLocalOpenAICompatibleProviderLabel,
   type OllamaGenerationReadiness,
 } from '../../utils/providerDiscovery.js'
+import { getCustomProviderLabel } from '../../utils/customProviders.js'
 
 export function buildProviderManagerCompletion(result?: ProviderManagerResult): {
   message: string
@@ -232,6 +233,12 @@ function getConfiguredOpenAICompatibleProviderLabel(
     model?: string
   },
 ): string {
+  // User-defined `customProviders` lanes resolve first by (baseUrl, model);
+  // matching is never by label so duplicate display labels are allowed.
+  const customLabel = getCustomProviderLabel(baseUrl, options?.model)
+  if (customLabel) {
+    return customLabel
+  }
   const routeId = resolveRouteIdFromBaseUrl(baseUrl)
   if (routeId) {
     return getRouteLabel(routeId) ?? 'OpenAI-compatible'
@@ -247,7 +254,7 @@ function getConfiguredOpenAICompatibleProviderLabel(
   }
 
   if (isLocalProviderUrl(request.baseUrl)) {
-    return getLocalOpenAICompatibleProviderLabel(request.baseUrl)
+    return getLocalOpenAICompatibleProviderLabel(request.baseUrl, request.resolvedModel ?? options?.model)
   }
 
   return 'OpenAI-compatible'

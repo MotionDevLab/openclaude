@@ -5,6 +5,12 @@ import { isProSubscriber, isMaxSubscriber, isTeamSubscriber } from './auth.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { getAPIProvider } from './model/providers.js'
 import { get3PModelCapabilityOverride } from './model/modelSupportOverrides.js'
+import {
+  CUSTOM_PROVIDER_EFFORT_LEVELS,
+  DEFAULT_CUSTOM_PROVIDER_EFFORT_LEVELS,
+  findMatchingCustomProvider,
+  type CustomProviderEffortLevel,
+} from './customProviders.js'
 import { getAntModelOverrideConfig, resolveAntModel } from './model/antModels.js'
 import { baseUrlSupportsResponsesAutoRoute, supportsCodexReasoningEffort } from '../services/api/providerConfig.js'
 import {
@@ -436,27 +442,67 @@ function resolveConfigured3PReasoningControl(
   context?: ReasoningControlContext,
 ): ReasoningControlResolution | undefined {
   const apiProvider = getReasoningApiProvider(context)
-  if (get3PModelCapabilityOverride(model, 'effort', apiProvider) !== true) {
+  const tierEffort = get3PModelCapabilityOverride(model, 'effort', apiProvider)
+  // Explicit tier pin wins, even over a matching customProviders entry.
+  if (tierEffort === false) {
     return undefined
   }
+  if (tierEffort === true) {
+    const levels: EffortLevel[] = ['low', 'medium', 'high']
+    if (
+      get3PModelCapabilityOverride(model, 'xhigh_effort', apiProvider) === true
+    ) {
+      levels.push('xhigh')
+    }
+    if (
+      get3PModelCapabilityOverride(model, 'max_effort', apiProvider) === true
+    ) {
+      levels.push('max')
+    }
 
-  const levels: EffortLevel[] = ['low', 'medium', 'high']
-  if (
-    get3PModelCapabilityOverride(model, 'xhigh_effort', apiProvider) === true
-  ) {
-    levels.push('xhigh')
+    return {
+      supportsReasoning: true,
+      controllable: true,
+      mode: 'levels',
+      levels,
+      defaultLevel: getLegacyDefaultEffortForModel(model, context),
+      wireFormat: 'reasoning_effort',
+      source: 'capability',
+    }
   }
-  if (
-    get3PModelCapabilityOverride(model, 'max_effort', apiProvider) === true
-  ) {
-    levels.push('max')
+
+  // No tier pin: consult the matched customProviders entry so a declared lane
+  // (e.g. spark via zen-router, Inkling via OpenRouter-direct) gets the same
+  // controllable `reasoning_effort` resolution. Gated to OpenAI-shim lanes so
+  // a wildcard entry plus stale OPENAI_* shell env cannot leak lane behavior
+  // into Anthropic/Bedrock/Vertex/Gemini sessions. Settings are read live on
+  // every call — deliberately outside get3PModelCapabilityOverride's env-only
+  // memo cache key — so settings edits take effect without a restart.
+  // Settings are guaranteed loaded before any reasoning resolution runs
+  // (startup order in src/entrypoints/cli.tsx: enableConfigs() precedes all
+  // resolution); a pre-load call simply sees no entries and resolves
+  // non-controllable, the safe default.
+  if (apiProvider !== 'openai' && apiProvider !== 'codex') {
+    return undefined
   }
+  const env = context?.processEnv ?? process.env
+  const entry = findMatchingCustomProvider(
+    context?.baseUrl ?? env.OPENAI_BASE_URL ?? env.OPENAI_API_BASE,
+    model,
+  )
+  if (!entry || entry.supportsEffort !== true) {
+    return undefined
+  }
+  const levels: EffortLevel[] = (entry.effortLevels ?? DEFAULT_CUSTOM_PROVIDER_EFFORT_LEVELS).filter(
+    (level): level is CustomProviderEffortLevel =>
+      (CUSTOM_PROVIDER_EFFORT_LEVELS as readonly string[]).includes(level),
+  )
 
   return {
     supportsReasoning: true,
     controllable: true,
     mode: 'levels',
-    levels,
+    levels: levels.length > 0 ? levels : [...DEFAULT_CUSTOM_PROVIDER_EFFORT_LEVELS],
     defaultLevel: getLegacyDefaultEffortForModel(model, context),
     wireFormat: 'reasoning_effort',
     source: 'capability',

@@ -36,6 +36,7 @@ import { capitalize } from '../stringUtils.js'
 import { DEFAULT_GEMINI_MODEL } from '../providerProfile.js'
 import { getAntModelOverrideConfig, resolveAntModel } from './antModels.js'
 import { getRouteDefaultModel, resolveActiveRouteIdFromEnv } from '../../integrations/routeMetadata.js'
+import { getCustomProviderSmallModel } from '../customProviders.js'
 
 export type ModelShortName = string
 export type ModelName = string
@@ -81,6 +82,19 @@ function getAllowedApiRouteConfigModel(): string | undefined {
 }
 
 export function getSmallFastModel(): ModelName {
+  // User-defined `customProviders` lane first, on OpenAI-shim lanes only: a
+  // wildcard entry plus stale OPENAI_* shell env must not hijack the small
+  // model of Anthropic/Bedrock/Vertex/Gemini sessions. Changing lanes in
+  // `/provider` changes the small model with it. Falls through to the
+  // existing chain when the active lane declares no `smallModel`.
+  const apiProvider = getAPIProvider()
+  if (apiProvider === 'openai' || apiProvider === 'codex') {
+    const customSmall = getCustomProviderSmallModel(
+      process.env.OPENAI_BASE_URL ?? process.env.OPENAI_API_BASE,
+      process.env.OPENAI_MODEL,
+    )
+    if (customSmall) return customSmall
+  }
   if (process.env.ANTHROPIC_SMALL_FAST_MODEL) return process.env.ANTHROPIC_SMALL_FAST_MODEL
   if (isCustomAnthropicProvider()) {
     return process.env.ANTHROPIC_MODEL || getDefaultHaikuModel()

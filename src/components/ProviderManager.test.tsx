@@ -23,6 +23,10 @@ const actualSettingsModule = (await import(
 const actualProviderStartupOverridesModule = (await import(
   `../utils/providerStartupOverrides.ts?providerManagerStartupOverridesActual=${Date.now()}-${Math.random()}`
 )) as ProviderStartupOverridesModule
+type CustomProvidersModule = typeof import('../utils/customProviders.js')
+const actualCustomProvidersModule = (await import(
+  `../utils/customProviders.ts?providerManagerCustomProvidersActual=${Date.now()}-${Math.random()}`
+)) as CustomProvidersModule
 const SYNC_START = '\x1B[?2026h'
 const SYNC_END = '\x1B[?2026l'
 
@@ -6300,5 +6304,262 @@ test('ProviderManager deleting the GitHub provider reverts the hydrated credenti
         process.env[key] = value
       }
     }
+  }
+})
+
+const CUSTOM_LANE_TEST_ENTRIES = [
+  {
+    id: 'zen-router',
+    label: 'OpenCode Zen Router',
+    baseUrl: 'http://127.0.0.1:18905/zen/v1',
+    models: ['spark-model', 'flash-model'],
+    supportsEffort: true,
+  },
+]
+
+const CUSTOM_LANE_ENV_KEYS = [
+  'CLAUDE_CODE_USE_OPENAI',
+  'OPENAI_BASE_URL',
+  'OPENAI_API_BASE',
+  'OPENAI_MODEL',
+  'OPENAI_API_KEY',
+] as const
+
+function mockCustomLaneEntries(): void {
+  mock.module('../utils/customProviders.js', () => ({
+    ...actualCustomProvidersModule,
+    getCustomProvidersFromSettings: () => CUSTOM_LANE_TEST_ENTRIES,
+  }))
+}
+
+function restoreCustomLaneEntries(): void {
+  mock.module('../utils/customProviders.js', () => actualCustomProvidersModule)
+}
+
+function snapshotCustomLaneEnv(): Map<string, string | undefined> {
+  const snapshot = new Map<string, string | undefined>()
+  for (const key of CUSTOM_LANE_ENV_KEYS) {
+    snapshot.set(key, process.env[key])
+  }
+  return snapshot
+}
+
+function restoreCustomLaneEnv(snapshot: Map<string, string | undefined>): void {
+  for (const [key, value] of snapshot) {
+    if (value === undefined) {
+      delete process.env[key]
+    } else {
+      process.env[key] = value
+    }
+  }
+}
+
+test('ProviderManager lists customProviders lanes in Set active provider', async () => {
+  delete process.env.CLAUDE_CODE_SIMPLE
+  delete process.env.CLAUDE_CODE_USE_GITHUB
+  delete process.env.GITHUB_TOKEN
+  delete process.env.GH_TOKEN
+
+  mockProviderManagerDependencies(() => undefined, async () => undefined, {
+    getProviderProfiles: () => [],
+  })
+  mockCustomLaneEntries()
+
+  const nonce = `${Date.now()}-${Math.random()}`
+  const { ProviderManager } = await import(`./ProviderManager.js?ts=${nonce}`)
+  const mounted = await mountProviderManager(ProviderManager)
+
+  try {
+    await waitForFrameOutput(
+      mounted.getOutput,
+      frame =>
+        frame.includes('Provider manager') &&
+        frame.includes('Set active provider'),
+    )
+
+    // Menu order is [Add, Set active, ...]; open "Set active provider".
+    mounted.stdin.write('j')
+    await Bun.sleep(25)
+    mounted.stdin.write('\r')
+
+    await waitForFrameOutput(
+      mounted.getOutput,
+      frame =>
+        frame.includes('Set active provider') &&
+        frame.includes('OpenCode Zen Router'),
+    )
+    await Bun.sleep(25)
+    const output = stripAnsi(extractLastFrame(mounted.getOutput()))
+
+    expect(output).toContain('OpenCode Zen Router')
+    expect(output).toContain(
+      'custom · http://127.0.0.1:18905/zen/v1 · spark-model, flash-model',
+    )
+  } finally {
+    await mounted.dispose()
+    restoreCustomLaneEntries()
+  }
+})
+
+test('ProviderManager activating a custom lane switches the session without persisting', async () => {
+  delete process.env.CLAUDE_CODE_SIMPLE
+  delete process.env.CLAUDE_CODE_USE_GITHUB
+  delete process.env.GITHUB_TOKEN
+  delete process.env.GH_TOKEN
+  const envSnapshot = snapshotCustomLaneEnv()
+  delete process.env.CLAUDE_CODE_USE_OPENAI
+  delete process.env.OPENAI_BASE_URL
+  delete process.env.OPENAI_API_BASE
+  delete process.env.OPENAI_MODEL
+  delete process.env.OPENAI_API_KEY
+
+  const onDone = mock(() => {})
+  const applySavedProfileToCurrentSession = mock(async () => null)
+  const setActiveProviderProfile = mock(() => null)
+  const appStateChanges: Array<{ newState: any; oldState: any }> = []
+
+  mockProviderManagerDependencies(() => undefined, async () => undefined, {
+    applySavedProfileToCurrentSession,
+    getProviderProfiles: () => [],
+    setActiveProviderProfile,
+  })
+  mockCustomLaneEntries()
+
+  const nonce = `${Date.now()}-${Math.random()}`
+  const { ProviderManager } = await import(`./ProviderManager.js?ts=${nonce}`)
+  const mounted = await mountProviderManager(ProviderManager, {
+    onDone,
+    onChangeAppState: args => {
+      appStateChanges.push(args as { newState: any; oldState: any })
+    },
+  })
+
+  try {
+    await waitForFrameOutput(
+      mounted.getOutput,
+      frame =>
+        frame.includes('Provider manager') &&
+        frame.includes('Set active provider'),
+    )
+
+    mounted.stdin.write('j')
+    await Bun.sleep(25)
+    mounted.stdin.write('\r')
+
+    await waitForFrameOutput(
+      mounted.getOutput,
+      frame =>
+        frame.includes('Set active provider') &&
+        frame.includes('OpenCode Zen Router'),
+    )
+    await Bun.sleep(25)
+    // The lane is the only entry (no saved profiles, no GitHub, Anthropic
+    // hidden while no third-party provider is active).
+    mounted.stdin.write('\r')
+
+    await waitForCondition(() => onDone.mock.calls.length > 0)
+
+    // Transient profile file through the shared session-apply path:
+    // endpoint + model from the entry, no key material.
+    expect(applySavedProfileToCurrentSession).toHaveBeenCalledWith({
+      profileFile: {
+        profile: 'openai',
+        env: {
+          CLAUDE_CODE_USE_OPENAI: '1',
+          OPENAI_BASE_URL: 'http://127.0.0.1:18905/zen/v1',
+          OPENAI_MODEL: 'spark-model',
+        },
+        createdAt: '2026-04-10T00:00:00.000Z',
+      },
+    })
+    // Session-only: the saved-profile store is untouched.
+    expect(setActiveProviderProfile).not.toHaveBeenCalled()
+    // Endpoint + model switch in-session. (String() because the deletes
+    // above narrow process.env.* to undefined for tsc.)
+    expect(String(process.env.OPENAI_BASE_URL)).toBe(
+      'http://127.0.0.1:18905/zen/v1',
+    )
+    expect(String(process.env.OPENAI_MODEL)).toBe('spark-model')
+    expect(
+      appStateChanges.some(
+        ({ newState }) => newState.mainLoopModel === 'spark-model',
+      ),
+    ).toBe(true)
+    expect(onDone).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'activated',
+        activeProviderName: 'OpenCode Zen Router',
+        activeProviderModel: 'spark-model',
+      }),
+    )
+  } finally {
+    await mounted.dispose()
+    restoreCustomLaneEntries()
+    restoreCustomLaneEnv(envSnapshot)
+  }
+})
+
+test('ProviderManager custom lane activation failure restores the previous env', async () => {
+  delete process.env.CLAUDE_CODE_SIMPLE
+  delete process.env.CLAUDE_CODE_USE_GITHUB
+  delete process.env.GITHUB_TOKEN
+  delete process.env.GH_TOKEN
+  const envSnapshot = snapshotCustomLaneEnv()
+  process.env.OPENAI_BASE_URL = 'https://orig.example/v1'
+  process.env.OPENAI_MODEL = 'original-model'
+  delete process.env.CLAUDE_CODE_USE_OPENAI
+  delete process.env.OPENAI_API_KEY
+
+  const onDone = mock(() => {})
+  const applySavedProfileToCurrentSession = mock(
+    async () => 'validation failed',
+  )
+
+  mockProviderManagerDependencies(() => undefined, async () => undefined, {
+    applySavedProfileToCurrentSession,
+    getProviderProfiles: () => [],
+    setActiveProviderProfile: () => null,
+  })
+  mockCustomLaneEntries()
+
+  const nonce = `${Date.now()}-${Math.random()}`
+  const { ProviderManager } = await import(`./ProviderManager.js?ts=${nonce}`)
+  const mounted = await mountProviderManager(ProviderManager, { onDone })
+
+  try {
+    await waitForFrameOutput(
+      mounted.getOutput,
+      frame =>
+        frame.includes('Provider manager') &&
+        frame.includes('Set active provider'),
+    )
+
+    mounted.stdin.write('j')
+    await Bun.sleep(25)
+    mounted.stdin.write('\r')
+
+    await waitForFrameOutput(
+      mounted.getOutput,
+      frame =>
+        frame.includes('Set active provider') &&
+        frame.includes('OpenCode Zen Router'),
+    )
+    await Bun.sleep(25)
+    mounted.stdin.write('\r')
+
+    await waitForFrameOutput(
+      mounted.getOutput,
+      frame => frame.includes('Could not activate OpenCode Zen Router'),
+    )
+
+    // A failed switch changes nothing.
+    expect(process.env.OPENAI_BASE_URL).toBe('https://orig.example/v1')
+    expect(process.env.OPENAI_MODEL).toBe('original-model')
+    expect(process.env.CLAUDE_CODE_USE_OPENAI).toBeUndefined()
+    expect(onDone).not.toHaveBeenCalled()
+  } finally {
+    await mounted.dispose()
+    restoreCustomLaneEntries()
+    restoreCustomLaneEnv(envSnapshot)
   }
 })

@@ -9,6 +9,8 @@ import {
 } from '../integrations/index.js'
 import * as realAuth from './auth.js'
 import * as realThinking from './thinking.js'
+import * as actualSettings from './settings/settings.js'
+import type { SettingsJson } from './settings/types.js'
 const realModelSupportOverridesModule = await import(
   `./model/modelSupportOverrides.js?real=${Date.now()}-${Math.random()}`,
 )
@@ -16,6 +18,26 @@ const realModelSupportOverrides = {
   get3PModelCapabilityOverride:
     realModelSupportOverridesModule.get3PModelCapabilityOverride,
 }
+
+// Gated customProviders override for the declared-lane effort tests below.
+// mock.module is process-wide and mock.restore() does NOT undo it, so the
+// mock delegates to the real settings implementation whenever no test sets
+// the flag (same pattern as providerDiscovery.test.ts).
+const realSettings = { ...actualSettings }
+let activeCustomProvidersOverride: SettingsJson['customProviders'] | null = null
+
+mock.module('./settings/settings.js', () => ({
+  ...realSettings,
+  getSettings_DEPRECATED: () => {
+    if (!activeCustomProvidersOverride) {
+      return realSettings.getSettings_DEPRECATED()
+    }
+    return {
+      ...(realSettings.getSettings_DEPRECATED() ?? {}),
+      customProviders: activeCustomProvidersOverride,
+    }
+  },
+}))
 
 const originalEnv = { ...process.env }
 const routingEnvKeys = [
@@ -69,6 +91,7 @@ beforeEach(async () => {
     './model/modelSupportOverrides.js',
     () => realModelSupportOverrides,
   )
+  activeCustomProvidersOverride = null
   for (const key of routingEnvKeys) {
     delete process.env[key]
   }
@@ -83,6 +106,7 @@ afterEach(() => {
       './model/modelSupportOverrides.js',
       () => realModelSupportOverrides,
     )
+    activeCustomProvidersOverride = null
     restoreProcessEnv()
   } finally {
     releaseSharedMutationLock()
@@ -436,5 +460,172 @@ describe('configured third-party effort precedence', () => {
     expect(
       resolveAppliedEffort('claude-opus-4-6', undefined, context),
     ).toBe('medium')
+  })
+})
+
+describe('customProviders declared-lane effort (§3.2)', () => {
+  const ZEN_BASE_URL = 'http://127.0.0.1:18905/zen/v1'
+  const SPARK_MODEL = 'muse-spark-1.3-contributor-free'
+
+  function zenContext(baseUrl: string | undefined = ZEN_BASE_URL) {
+    return {
+      apiProvider: 'openai' as const,
+      routeId: 'custom',
+      useRuntimeFallback: false,
+      baseUrl,
+    }
+  }
+
+  function declareZenLane(entry?: Record<string, unknown>) {
+    activeCustomProvidersOverride = [
+      {
+        id: 'zen-router',
+        label: 'OpenCode Zen Router',
+        baseUrl: ZEN_BASE_URL,
+        models: [SPARK_MODEL, 'nemotron-3.5-lightning-free'],
+        supportsEffort: true,
+        ...(entry ?? {}),
+      },
+    ]
+  }
+
+  test('matched entry resolves controllable reasoning_effort with default levels', async () => {
+    declareZenLane()
+    const { modelSupportsEffort, resolveModelReasoningControl, getAvailableEffortLevels } =
+      await importFreshEffortModule()
+
+    expect(resolveModelReasoningControl(SPARK_MODEL, zenContext())).toMatchObject({
+      supportsReasoning: true,
+      controllable: true,
+      mode: 'levels',
+      levels: ['low', 'medium', 'high'],
+      wireFormat: 'reasoning_effort',
+      source: 'capability',
+    })
+    expect(modelSupportsEffort(SPARK_MODEL, zenContext())).toBe(true)
+    expect(getAvailableEffortLevels(SPARK_MODEL, zenContext())).toEqual([
+      'low',
+      'medium',
+      'high',
+    ])
+  })
+
+  test('entry effortLevels are honored (lanes opt into more)', async () => {
+    declareZenLane({ effortLevels: ['low', 'medium', 'high', 'xhigh'] })
+    const { resolveModelReasoningControl, getAvailableEffortLevels } =
+      await importFreshEffortModule()
+
+    expect(resolveModelReasoningControl(SPARK_MODEL, zenContext())).toMatchObject({
+      controllable: true,
+      levels: ['low', 'medium', 'high', 'xhigh'],
+      wireFormat: 'reasoning_effort',
+      source: 'capability',
+    })
+    expect(getAvailableEffortLevels(SPARK_MODEL, zenContext())).toEqual([
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+    ])
+  })
+
+  test('model mismatch on the same base URL stays non-controllable', async () => {
+    declareZenLane()
+    const { modelSupportsEffort, resolveModelReasoningControl } =
+      await importFreshEffortModule()
+
+    expect(modelSupportsEffort('gpt-4o', zenContext())).toBe(false)
+    expect(
+      resolveModelReasoningControl('gpt-4o', zenContext()).controllable,
+    ).toBe(false)
+  })
+
+  test('entry without supportsEffort stays non-controllable', async () => {
+    declareZenLane({ supportsEffort: false })
+    const { modelSupportsEffort } = await importFreshEffortModule()
+
+    expect(modelSupportsEffort(SPARK_MODEL, zenContext())).toBe(false)
+  })
+
+  test('explicit tier false wins over a matching entry', async () => {
+    declareZenLane()
+    // Pin the model in a tier WITHOUT the effort capability: the tier
+    // override resolves false and must beat the entry.
+    process.env.ANTHROPIC_DEFAULT_SONNET_MODEL = SPARK_MODEL
+    process.env.ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES = 'thinking'
+    const { modelSupportsEffort, resolveModelReasoningControl } =
+      await importFreshEffortModule()
+
+    expect(modelSupportsEffort(SPARK_MODEL, zenContext())).toBe(false)
+    expect(
+      resolveModelReasoningControl(SPARK_MODEL, zenContext()).controllable,
+    ).toBe(false)
+  })
+
+  test('explicit tier true keeps the existing resolution (entry ignored)', async () => {
+    declareZenLane({ effortLevels: ['low'] })
+    process.env.ANTHROPIC_DEFAULT_SONNET_MODEL = SPARK_MODEL
+    process.env.ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES =
+      'effort,max_effort,xhigh_effort'
+    const { resolveModelReasoningControl } = await importFreshEffortModule()
+
+    expect(resolveModelReasoningControl(SPARK_MODEL, zenContext())).toMatchObject({
+      controllable: true,
+      levels: ['low', 'medium', 'high', 'xhigh', 'max'],
+      wireFormat: 'reasoning_effort',
+      source: 'capability',
+    })
+  })
+
+  test('settings edits take effect without a restart (no stale memo)', async () => {
+    declareZenLane()
+    const { modelSupportsEffort } = await importFreshEffortModule()
+    const context = zenContext()
+
+    expect(modelSupportsEffort(SPARK_MODEL, context)).toBe(true)
+
+    // Flip the lane off mid-session: the same module instance must observe it.
+    declareZenLane({ supportsEffort: false })
+    expect(modelSupportsEffort(SPARK_MODEL, context)).toBe(false)
+  })
+
+  test('env base URL fallback covers callers without context baseUrl', async () => {
+    declareZenLane()
+    process.env.OPENAI_BASE_URL = ZEN_BASE_URL
+    const { modelSupportsEffort } = await importFreshEffortModule()
+
+    expect(
+      modelSupportsEffort(SPARK_MODEL, {
+        apiProvider: 'openai' as const,
+        routeId: 'custom',
+        useRuntimeFallback: false,
+      }),
+    ).toBe(true)
+  })
+
+  test('wildcard entry plus stale env does not leak into first-party sessions', async () => {
+    activeCustomProvidersOverride = [
+      {
+        id: 'local-proxy',
+        label: 'Local Proxy',
+        baseUrl: 'http://127.0.0.1:11434/v1',
+        supportsEffort: true,
+      },
+    ]
+    process.env.OPENAI_BASE_URL = 'http://127.0.0.1:11434/v1'
+    const { resolveModelReasoningControl } = await importFreshEffortModule()
+    const route = {
+      routeId: 'custom',
+      useRuntimeFallback: false,
+    } as const
+
+    // Same env, OpenAI-shim lane: the entry resolves.
+    expect(
+      resolveModelReasoningControl('gpt-4o', { ...route, apiProvider: 'openai' as const }),
+    ).toMatchObject({ controllable: true, source: 'capability' })
+    // Same env, first-party session: the entry must not apply.
+    expect(
+      resolveModelReasoningControl('gpt-4o', { ...route, apiProvider: 'firstParty' as const }).source,
+    ).not.toBe('capability')
   })
 })
