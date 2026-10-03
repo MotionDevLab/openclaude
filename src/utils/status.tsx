@@ -31,6 +31,7 @@ import {
   getRouteProviderTypeLabel,
   resolveActiveRouteIdFromEnv,
 } from '../integrations/routeMetadata.js';
+import { getCustomProviderLabel } from './customProviders.js';
 export type Property = {
   label?: string;
   value: React.ReactNode | Array<string>;
@@ -649,11 +650,18 @@ export function buildAPIProviderProperties(): Property[] {
   if (apiProvider !== 'firstParty') {
     // The legacy "openai" bucket collapses many concrete providers (OpenRouter,
     // Groq, Ollama, Fireworks, etc.) into a single "OpenAI-compatible" label.
-    // When route resolution identifies a concrete provider, surface its real
+    // User-defined `customProviders` lanes resolve first by (baseUrl, model);
+    // when route resolution identifies a concrete provider, surface its real
     // label instead. Dedicated buckets (nvidia-nim, minimax, codex, github,
     // xai, ...) already have accurate labels and are left untouched.
+    const customLabel = apiProvider === 'openai'
+      ? getCustomProviderLabel(
+        getOpenAICompatibleBaseUrlForStatus(routeId),
+        getOpenAICompatibleModelForStatus(routeId),
+      )
+      : undefined;
     const routeLabel = routeId ? getRouteLabel(routeId) : null;
-    const providerLabel = routeLabel ?? API_PROVIDER_LABELS[apiProvider];
+    const providerLabel = customLabel ?? routeLabel ?? API_PROVIDER_LABELS[apiProvider];
     properties.push({
       label: routeId ? 'Provider route' : 'API provider',
       value: providerLabel

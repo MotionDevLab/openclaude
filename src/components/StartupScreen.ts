@@ -12,6 +12,7 @@ import {
   resolveRouteIdFromBaseUrl,
 } from '../integrations/routeMetadata.js'
 import { getLocalOpenAICompatibleProviderLabel } from '../utils/providerDiscovery.js'
+import { getCustomProviderLabel } from '../utils/customProviders.js'
 import { getSettings_DEPRECATED } from '../utils/settings/settings.js'
 import { parseUserSpecifiedModel } from '../utils/model/model.js'
 import { DEFAULT_GEMINI_MODEL } from '../utils/providerProfile.js'
@@ -112,8 +113,11 @@ export function detectProvider(modelOverride?: string): { name: string; model: s
     const isLocal = isLocalProviderUrl(baseUrl)
     const routeId = resolveRouteIdFromBaseUrl(baseUrl)
     let name = 'OpenAI'
+    // User-defined `customProviders` lanes resolve first by (baseUrl, model).
+    const customLabel = getCustomProviderLabel(baseUrl, resolvedRequest.resolvedModel ?? rawModel)
+    if (customLabel) name = customLabel
     // Explicit dedicated-provider env flags win.
-    if (process.env.NVIDIA_NIM) name = 'NVIDIA NIM'
+    else if (process.env.NVIDIA_NIM) name = 'NVIDIA NIM'
     else if (process.env.MINIMAX_API_KEY) name = 'MiniMax'
     else if (
       resolvedRequest.transport === 'codex_responses' ||
@@ -149,7 +153,7 @@ export function detectProvider(modelOverride?: string): { name: string; model: s
     else if (/bankr/i.test(baseUrl)) name = 'Bankr'
     else if (/bankr/i.test(rawModel)) name = 'Bankr'
     else if (/atlas\.cloud/i.test(rawModel)) name = 'Atlas Cloud'
-    else if (isLocal) name = getLocalOpenAICompatibleProviderLabel(baseUrl)
+    else if (isLocal) name = getLocalOpenAICompatibleProviderLabel(baseUrl, resolvedRequest.resolvedModel ?? rawModel)
     
     // Resolve model alias to actual model name + reasoning effort
     let displayModel = resolvedRequest.resolvedModel

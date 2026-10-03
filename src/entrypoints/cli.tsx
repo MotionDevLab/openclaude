@@ -459,6 +459,26 @@ export async function main(
       await importers.managedEnv()
     applySafeConfigEnvironmentVariables()
   }
+
+  // customProviders: fail loudly at startup naming entry + field. Settings
+  // are loaded by now (enableConfigs above); an invalid lane would otherwise
+  // silently fall through to generic labels and defaults.
+  {
+    const { getSettings_DEPRECATED } = await import(
+      '../utils/settings/settings.js'
+    )
+    const { validateCustomProviders } = await import(
+      '../utils/customProviders.js'
+    )
+    const problems = validateCustomProviders(
+      (getSettings_DEPRECATED() as { customProviders?: unknown } | null)?.customProviders,
+    )
+    if (problems.length > 0) {
+      // biome-ignore lint/suspicious/noConsole:: intentional error output
+      console.error(`Invalid customProviders in settings.json:\n- ${problems.join('\n- ')}`)
+      process.exit(1)
+    }
+  }
   reapplyExplicitProviderInputs()
 
   // Local skills management must stay available even when provider startup

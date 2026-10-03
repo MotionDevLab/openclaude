@@ -4,6 +4,7 @@ import {
   getRouteLabel,
   resolveRouteIdFromBaseUrl,
 } from '../integrations/routeMetadata.js'
+import { getCustomProviderLabel } from './customProviders.js'
 
 export const DEFAULT_OLLAMA_BASE_URL = 'http://localhost:11434'
 export const DEFAULT_ATOMIC_CHAT_BASE_URL = 'http://127.0.0.1:1337'
@@ -158,7 +159,14 @@ export function getOpenAICompatibleModelsBaseUrl(baseUrl?: string): string {
   ).replace(/\/+$/, '')
 }
 
-export function getLocalOpenAICompatibleProviderLabel(baseUrl?: string): string {
+export function getLocalOpenAICompatibleProviderLabel(baseUrl?: string, model?: string): string {
+  // User-defined `customProviders` lanes win: match by (baseUrl, model) so a
+  // zen-router-style lane gets its real name instead of generic
+  // "Local OpenAI-compatible". Everything below is untouched.
+  const customLabel = getCustomProviderLabel(baseUrl, model)
+  if (customLabel) {
+    return customLabel
+  }
   try {
     const parsed = new URL(getOpenAICompatibleModelsBaseUrl(baseUrl))
     const host = parsed.host.toLowerCase()

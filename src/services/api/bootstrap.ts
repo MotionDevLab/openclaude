@@ -246,12 +246,12 @@ export async function fetchLocalOpenAIModelOptions(
     return null
   }
 
-  const { baseUrl } = resolveRequest()
+  const { baseUrl, resolvedModel } = resolveRequest()
   const routeId = resolveDiscoveryRouteIdFromBaseUrl(baseUrl)
   const routeLabel =
     (routeId
       ? getGateway(routeId)?.label ?? getVendor(routeId)?.label
-      : undefined) ?? getLocalOpenAICompatibleProviderLabel(baseUrl)
+      : undefined) ?? getLocalOpenAICompatibleProviderLabel(baseUrl, resolvedModel)
   const routeCredential = resolveRouteCredentialValue({
     routeId: routeId ?? 'custom',
     baseUrl,

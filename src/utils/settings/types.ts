@@ -128,6 +128,47 @@ export const ModelPricingDiagnosticSchema = z.unknown().superRefine(
 )
 
 /**
+ * One user-defined provider lane (`customProviders` entry). Mechanism, not
+ * hardcode: zen-router lanes and OpenRouter-direct models share this shape.
+ * Secrets are deliberately absent — API keys stay in env files / shell env,
+ * never in `settings.json`. Plaintext `http://` base URLs are restricted to
+ * loopback hosts (`localhost`, `127.0.0.1`, `::1`); non-loopback `http://`
+ * stays rejected. See `src/utils/customProviders.ts` for the runtime
+ * validation mirror (startup hard-fail naming entry + field).
+ */
+export const CustomProviderEntrySchema = z
+  .object({
+    id: z
+      .string()
+      .regex(/^[a-z0-9-]+$/)
+      .describe('Lane id: [a-z0-9-], unique.'),
+    label: z.string().min(1).describe('Display label shown in UI surfaces.'),
+    baseUrl: z.string().min(1).describe('OpenAI-compatible base URL.'),
+    models: z
+      .array(z.string().min(1))
+      .optional()
+      .describe(
+        'Model ids served on this base URL (case-insensitive match). Omitted or ["*"] = all models discovered on baseUrl.',
+      ),
+    supportsEffort: z
+      .boolean()
+      .optional()
+      .describe('Opt the lane into the effort picker (sent as reasoning_effort). Default false.'),
+    effortLevels: z
+      .array(z.enum(['low', 'medium', 'high', 'xhigh', 'max']))
+      .optional()
+      .describe('Effort levels offered on this lane. Default ["low", "medium", "high"].'),
+    smallModel: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        'Per-lane small/fast model for background chores (token estimation, hook models, search planning, summaries).',
+      ),
+  })
+  .strict()
+
+/**
  * Schema for environment variables
  */
 export const EnvironmentVariablesSchema = lazySchema(() =>
@@ -950,6 +991,14 @@ export const SettingsSchema = lazySchema(() =>
             'or quota error, OpenClaude advances to the next profile in this list (starting after ' +
             'the currently-active id) and retries the turn. ' +
             'Example: ["provider_anthropic", "provider_openai", "provider_ollama"]',
+        ),
+      customProviders: z
+        .array(CustomProviderEntrySchema)
+        .optional()
+        .describe(
+          'User-defined provider lanes (e.g. a zen-router lane or OpenRouter-direct models). ' +
+            'Matched by (baseUrl, model); labels are display-only and may duplicate saved-profile names. ' +
+            'No apiKey field by design — secrets stay in env files / shell env.',
         ),
       modelLimits: z
         .record(
