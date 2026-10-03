@@ -1000,6 +1000,16 @@ export const SettingsSchema = lazySchema(() =>
             'Matched by (baseUrl, model); labels are display-only and may duplicate saved-profile names. ' +
             'No apiKey field by design — secrets stay in env files / shell env.',
         ),
+      providerEnvFile: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          'Default provider env file loaded at startup when no explicit --provider-env-file is given. ' +
+            'Leading ~ expands to the home dir; relative paths resolve against the OpenClaude config dir. ' +
+            'Same allowlist as --provider-env-file; only fills unset keys, so settings env wins on collision. ' +
+            'Example: "~/.openclaude/providers/zen-router.env".',
+        ),
       modelLimits: z
         .record(
           z.string(),

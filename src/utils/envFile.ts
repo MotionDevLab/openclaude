@@ -1,4 +1,7 @@
 import { readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { isAbsolute, join } from 'node:path'
+import { getClaudeConfigHomeDir } from './envUtils.js'
 
 const ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/
 
@@ -382,4 +385,54 @@ export function loadEnvFile(filePath: string): Record<string, string> {
     const message = error instanceof Error ? error.message : String(error)
     throw new Error(`Failed to load --provider-env-file at ${filePath}: ${message}`)
   }
+}
+
+/**
+ * Resolves a `providerEnvFile` settings value to an absolute path.
+ *
+ * - A leading `~` expands to the user home dir (Node never expands it —
+ *   the PowerShell `~` papercut from 2026-10-02). Mirrors expandTilde
+ *   semantics without importing the heavy permissions module into early
+ *   startup. `~user` forms are NOT expanded (left for join() to anchor).
+ * - Relative paths resolve against the OpenClaude config dir.
+ * - Absolute paths pass through.
+ */
+export function resolveProviderEnvFilePath(
+  rawPath: string,
+  configDir?: string,
+): string {
+  const trimmed = rawPath.trim()
+  let expanded = trimmed
+  if (trimmed === '~') {
+    expanded = homedir()
+  } else if (
+    trimmed.startsWith('~/') ||
+    (process.platform === 'win32' && trimmed.startsWith('~\\'))
+  ) {
+    expanded = join(homedir(), trimmed.slice(2))
+  }
+  if (isAbsolute(expanded)) {
+    return expanded
+  }
+  return join(configDir ?? getClaudeConfigHomeDir(), expanded)
+}
+
+/**
+ * Decides whether the settings-default provider env file applies and where
+ * it lives. Returns the resolved path, or null when an explicit
+ * `--provider-env-file` was given (explicit flags always win) or the
+ * `providerEnvFile` setting is absent/blank. Pure: takes args + setting so
+ * the startup load order is unit-testable without booting the CLI.
+ */
+export function resolveDefaultProviderEnvFile(
+  args: string[],
+  setting: unknown,
+): string | null {
+  if (parseProviderEnvFileArgs(args).paths.length > 0) {
+    return null
+  }
+  if (typeof setting !== 'string' || setting.trim().length === 0) {
+    return null
+  }
+  return resolveProviderEnvFilePath(setting)
 }

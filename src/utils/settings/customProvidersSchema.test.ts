@@ -65,3 +65,17 @@ test('customProviders rejects invalid effortLevels', () => {
 test('settings without customProviders still parse (key is optional)', () => {
   expect(SettingsSchema().safeParse({}).success).toBe(true)
 })
+
+test('providerEnvFile accepts a settings-default path', () => {
+  expect(
+    SettingsSchema().safeParse({
+      providerEnvFile: '~/.openclaude/providers/zen-router.env',
+    }).success,
+  ).toBe(true)
+})
+
+test('providerEnvFile rejects an empty path', () => {
+  expect(SettingsSchema().safeParse({ providerEnvFile: '' }).success).toBe(
+    false,
+  )
+})

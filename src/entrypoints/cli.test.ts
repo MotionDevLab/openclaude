@@ -354,6 +354,21 @@ describe('cli.tsx — --provider startup ordering', () => {
     expect(process.env.GEMINI_MODEL).toBe('gemini-2.0-flash')
   })
 
+  it('loads the settings-default provider env file at settings tier (before profile routing)', async () => {
+    const src = await Bun.file(`${import.meta.dir}/cli.tsx`).text()
+    const settingsApplyIndex = src.indexOf('applySafeConfigEnvironmentVariables()')
+    const defaultFileIndex = src.indexOf('resolveDefaultProviderEnvFile(')
+    const explicitReapplyIndex = src.indexOf('reapplyExplicitProviderInputs()')
+    const profileApplyIndex = src.indexOf('await applyStartupEnvFromProfile')
+
+    expect(settingsApplyIndex).toBeGreaterThanOrEqual(0)
+    expect(defaultFileIndex).toBeGreaterThan(settingsApplyIndex)
+    // Explicit flags are reapplied after the default load and always win:
+    // resolveDefaultProviderEnvFile returns null for explicit invocations.
+    expect(explicitReapplyIndex).toBeGreaterThan(defaultFileIndex)
+    expect(profileApplyIndex).toBeGreaterThan(defaultFileIndex)
+  })
+
   it('dispatches background session management before provider validation', async () => {
     const src = await Bun.file(`${import.meta.dir}/cli.tsx`).text()
     const bgManagementIndex = src.indexOf("args[0] === 'ps'")

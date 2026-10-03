@@ -479,6 +479,35 @@ export async function main(
       process.exit(1)
     }
   }
+
+  // providerEnvFile (settings default): plain `openclaude` boots the
+  // configured lane with zero typing. Loads at settings tier — after
+  // settings.env applied above, before the saved-profile merge below — via
+  // the same loadEnvFile (same allowlist; only fills unset keys, so a key
+  // set in both places keeps the settings value and the file fills gaps
+  // only). Skipped when an explicit --provider-env-file was given; explicit
+  // flags are reapplied after every merge below and always win.
+  {
+    const { getSettings_DEPRECATED } = await import(
+      '../utils/settings/settings.js'
+    )
+    const { loadEnvFile, resolveDefaultProviderEnvFile } = await import(
+      '../utils/envFile.js'
+    )
+    const resolved = resolveDefaultProviderEnvFile(
+      args,
+      (getSettings_DEPRECATED() as { providerEnvFile?: unknown } | null)?.providerEnvFile,
+    )
+    if (resolved) {
+      try {
+        loadEnvFile(resolved)
+      } catch (err: unknown) {
+        // biome-ignore lint/suspicious/noConsole:: intentional error output
+        console.error(err instanceof Error ? err.message : String(err))
+        process.exit(1)
+      }
+    }
+  }
   reapplyExplicitProviderInputs()
 
   // Local skills management must stay available even when provider startup
