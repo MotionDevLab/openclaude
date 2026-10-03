@@ -473,13 +473,18 @@ function resolveConfigured3PReasoningControl(
 
   // No tier pin: consult the matched customProviders entry so a declared lane
   // (e.g. spark via zen-router, Inkling via OpenRouter-direct) gets the same
-  // controllable `reasoning_effort` resolution. Settings are read live on
+  // controllable `reasoning_effort` resolution. Gated to OpenAI-shim lanes so
+  // a wildcard entry plus stale OPENAI_* shell env cannot leak lane behavior
+  // into Anthropic/Bedrock/Vertex/Gemini sessions. Settings are read live on
   // every call — deliberately outside get3PModelCapabilityOverride's env-only
   // memo cache key — so settings edits take effect without a restart.
   // Settings are guaranteed loaded before any reasoning resolution runs
   // (startup order in src/entrypoints/cli.tsx: enableConfigs() precedes all
   // resolution); a pre-load call simply sees no entries and resolves
   // non-controllable, the safe default.
+  if (apiProvider !== 'openai' && apiProvider !== 'codex') {
+    return undefined
+  }
   const env = context?.processEnv ?? process.env
   const entry = findMatchingCustomProvider(
     context?.baseUrl ?? env.OPENAI_BASE_URL ?? env.OPENAI_API_BASE,

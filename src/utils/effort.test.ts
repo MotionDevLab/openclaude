@@ -602,4 +602,30 @@ describe('customProviders declared-lane effort (§3.2)', () => {
       }),
     ).toBe(true)
   })
+
+  test('wildcard entry plus stale env does not leak into first-party sessions', async () => {
+    activeCustomProvidersOverride = [
+      {
+        id: 'local-proxy',
+        label: 'Local Proxy',
+        baseUrl: 'http://127.0.0.1:11434/v1',
+        supportsEffort: true,
+      },
+    ]
+    process.env.OPENAI_BASE_URL = 'http://127.0.0.1:11434/v1'
+    const { resolveModelReasoningControl } = await importFreshEffortModule()
+    const route = {
+      routeId: 'custom',
+      useRuntimeFallback: false,
+    } as const
+
+    // Same env, OpenAI-shim lane: the entry resolves.
+    expect(
+      resolveModelReasoningControl('gpt-4o', { ...route, apiProvider: 'openai' as const }),
+    ).toMatchObject({ controllable: true, source: 'capability' })
+    // Same env, first-party session: the entry must not apply.
+    expect(
+      resolveModelReasoningControl('gpt-4o', { ...route, apiProvider: 'firstParty' as const }).source,
+    ).not.toBe('capability')
+  })
 })

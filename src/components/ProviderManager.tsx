@@ -4074,7 +4074,13 @@ export function ProviderManager({ mode, onDone }: Props): React.ReactNode {
         <Box flexDirection="column">
           {profiles.length === 0 && !githubProviderAvailable ? (
             isGithubCredentialSourceResolved ? (
-              <Text dimColor>No provider profiles configured yet.</Text>
+              customLanes.length > 0 ? (
+                <Text dimColor>
+                  Custom provider lanes available — use Set active provider.
+                </Text>
+              ) : (
+                <Text dimColor>No provider profiles configured yet.</Text>
+              )
             ) : (
               <Text dimColor>Checking GitHub Models credentials...</Text>
             )
@@ -4249,7 +4255,9 @@ export function ProviderManager({ mode, onDone }: Props): React.ReactNode {
         const active =
           findMatchingCustomProvider(currentBaseUrl, currentModel, [entry]) !==
           undefined
-        const models = (entry.models ?? []).map(m => m.trim()).filter(Boolean)
+        const models = (Array.isArray(entry.models) ? entry.models : [])
+          .map(m => (typeof m === 'string' ? m.trim() : ''))
+          .filter(Boolean)
         const modelSurface =
           models.length === 0 || (models.length === 1 && models[0] === '*')
             ? 'discovered models'

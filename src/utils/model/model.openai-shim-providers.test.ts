@@ -395,6 +395,25 @@ test('getSmallFastModel falls through when the lane declares no smallModel', asy
   expect(getSmallFastModel()).toBe('muse-spark-1.3-contributor-free')
 })
 
+test('getSmallFastModel ignores lane entries off OpenAI-shim providers', async () => {
+  activeCustomProvidersOverride = [
+    {
+      id: 'local-proxy',
+      label: 'Local Proxy',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      smallModel: 'lane-small-model',
+    },
+  ]
+  // First-party session with stale OpenAI env: the mocked getAPIProvider
+  // reports firstParty without CLAUDE_CODE_USE_* flags.
+  process.env.OPENAI_BASE_URL = 'http://127.0.0.1:11434/v1'
+  process.env.OPENAI_MODEL = 'stale-model'
+  process.env.ANTHROPIC_SMALL_FAST_MODEL = 'env-small-model'
+
+  const { getSmallFastModel } = await importFreshModelModule()
+  expect(getSmallFastModel()).toBe('env-small-model')
+})
+
 test('getDefaultOpusModel returns OPENAI_MODEL for MiniMax', async () => {
   process.env.MINIMAX_API_KEY = 'minimax-test'
   process.env.OPENAI_MODEL = 'MiniMax-M2.7'

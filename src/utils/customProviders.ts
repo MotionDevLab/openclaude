@@ -220,10 +220,15 @@ export function getCustomProvidersFromSettings(): CustomProviderEntry[] {
 }
 
 function entryCoversAllModels(entry: CustomProviderEntry): boolean {
-  if (entry.models === undefined) {
+  // Non-array models cannot occur via validated settings (startup
+  // hard-fails naming entry + field); treat as wildcard rather than
+  // throwing so a malformed programmatic entry degrades gracefully.
+  if (!Array.isArray(entry.models)) {
     return true
   }
-  const models = entry.models.map(m => m.trim()).filter(m => m.length > 0)
+  const models = entry.models
+    .map(m => (typeof m === 'string' ? m.trim() : ''))
+    .filter(m => m.length > 0)
   return models.length === 0 || (models.length === 1 && models[0] === '*')
 }
 
@@ -235,7 +240,9 @@ function entryMatchesModel(entry: CustomProviderEntry, model: string | undefined
     return true
   }
   const normalized = normalizeModel(model)
-  return entry.models!.some(m => normalizeModel(m) === normalized)
+  return (entry.models ?? []).some(
+    m => typeof m === 'string' && normalizeModel(m) === normalized,
+  )
 }
 
 /**
@@ -297,8 +304,8 @@ export function getCustomLaneDefaultModel(
   currentModel: string | undefined,
 ): string | undefined {
   if (!entryCoversAllModels(entry)) {
-    const first = entry.models!
-      .map(m => m.trim())
+    const first = (Array.isArray(entry.models) ? entry.models : [])
+      .map(m => (typeof m === 'string' ? m.trim() : ''))
       .find(m => m.length > 0)
     if (first) {
       return first
