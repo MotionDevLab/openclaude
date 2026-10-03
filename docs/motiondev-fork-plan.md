@@ -48,7 +48,13 @@ New optional top-level `settings.json` key:
     "models": ["muse-spark-1.3-contributor-free", "nemotron-3.5-lightning-free"],
     // models omitted or ["*"] = all models discovered on baseUrl
     "supportsEffort": true,                   // default false
-    "effortLevels": ["low", "medium", "high"] // default exactly this
+    "effortLevels": ["low", "medium", "high"], // default exactly this
+    "smallModel": "nemotron-3.5-lightning-free"
+    // optional per-lane small/fast model for background chores
+    // (token estimation, hook models, search planning, summaries).
+    // Fallback chain: entry.smallModel → ANTHROPIC_SMALL_FAST_MODEL env
+    // → OPENAI_MODEL (current default = main model). Omitted = divided
+    // setup off for that lane.
   },
   {
     "id": "openrouter-direct",
@@ -91,6 +97,16 @@ Touch points (source paths in fork):
   unparseable baseUrl) fails loudly at startup naming entry + field.
   No `apiKey` field on entries by design: secrets stay in env files /
   shell env, never in `settings.json`.
+- **Small-model lookup** — `getSmallFastModel()`
+  (`src/utils/model/model.ts` ~line 83): consult the matched
+  `customProviders` entry FIRST (`entry.smallModel`); else existing chain
+  (`ANTHROPIC_SMALL_FAST_MODEL` → provider default, which is
+  `OPENAI_MODEL` on `openai`-provider lanes). There is deliberately no
+  picker for this (verified: no UI/command surface exists upstream) —
+  the lane switch IS the picker: changing lanes in `/provider` changes
+  the small model with it. Default `smallModel` values mirror the
+  OpenCode/CodeAF division (Nemotron-class for chores, main model for
+  reasoning).
 
 ### 3.2 Effort for declared lanes
 
