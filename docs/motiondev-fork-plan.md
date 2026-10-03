@@ -9,7 +9,7 @@
 
 ## 1. Goal
 
-Three minimal, orthogonal, mechanism-not-hardcode patches (Approach 1):
+Four minimal, orthogonal, mechanism-not-hardcode patches (Approach 1):
 
 1. **User-defined provider presets** — a zen-router-style lane gets a real
    name ("OpenCode Zen Router") in `/provider`, `/model`, and the startup
@@ -20,6 +20,8 @@ Three minimal, orthogonal, mechanism-not-hardcode patches (Approach 1):
 3. **Default provider-env-file** — plain `openclaude` boots the configured
    lane with zero typing; explicit `--provider-env-file` / `--provider`
    flags still win.
+4. **Custom lanes switchable in `/provider`** — `customProviders` entries
+   appear in "Set active provider" and switch in-session, no restart.
 
 ## 2. Non-goals
 
@@ -152,11 +154,35 @@ Docs: update README provider/env-file note
 default, and document `customProviders` + `providerEnvFile` in
 `docs/` (new page, linked from README).
 
+### 3.4 Custom lanes in "Set active provider" (in-session switch, no restart)
+
+Verified live (screenshot 2026-10-03) and in source: "Set active provider"
+switches saved profiles in-session via `setActiveProviderProfile(profileId)`
+(`src/components/ProviderManager.tsx` ~line 1616 — "OpenClaude switched to
+it for this session"). Only the guided-setup *save* path needs a restart;
+switching does not.
+
+- **Patch**: list `customProviders` entries in the "Set active provider"
+  menu (same file ~line 1172 area). On select, build the
+  profile-equivalent env from the entry (`CLAUDE_CODE_USE_OPENAI=1`,
+  `OPENAI_BASE_URL=<entry>`, `OPENAI_MODEL=<entry default or current
+  lane model>`, no key material) and run it through the same session-apply
+  path — either by generalizing `setActiveProviderProfile` to resolve
+  custom ids, or by synthesizing a transient profile file and calling
+  `applySavedProfileToCurrentSession` (implementation picks; both reuse
+  proven code, no new transport logic).
+- Switching back to saved profiles / Anthropic uses the existing clear
+  paths untouched. Model choice inside the lane stays in `/model`
+  (models are discovered live from the endpoint).
+- Precedence with §3.3: an in-session switch beats the startup default
+  for that session only; next launch re-applies `providerEnvFile`.
+
 ## 4. Branch & commit plan
 
 - Feature branch `feat/custom-providers` (already created from `main` @
   `9a2910da`; docs commit `b3518f9` pushed).
-- Three discrete code commits (one per §3.1/§3.2/§3.3) + tests per commit, so
+- Three discrete code commits (one per §3.1/§3.2/§3.3) + tests per commit,
+  plus a fourth for §3.4 (menu listing + session-apply reuse + tests) — so
   rebases and upstream PRs stay separable.
 - Keep the fork's `main` tracking `Twigpine/main`; rebase policy: pin +
   on-demand (no per-release churn).
@@ -168,7 +194,9 @@ default, and document `customProviders` + `providerEnvFile` in
   `src/utils/providerDiscovery.test.ts`,
   `src/commands/provider/provider.test.tsx`,
   `src/commands/model/model.test.tsx`, `src/entrypoints/cli.test.ts`
-  (extend with: default-env-file load order, explicit-flag-wins cases).
+  (extend with: default-env-file load order, explicit-flag-wins cases),
+  `src/components/ProviderManager` tests (custom entries listed,
+  activation builds entry env and calls the session-apply path).
 - `bun run build` + `bun run smoke` clean.
 - Repo pre-push contract per `CONTRIBUTING.md` before any push.
 - Live matrix on this machine (Windows PowerShell):
@@ -176,16 +204,20 @@ default, and document `customProviders` + `providerEnvFile` in
   2. `/model` on spark → effort levels offered (no "not supported").
   3. Prompt at low vs high → HTTP 200s in router dashboard logs
      (`http://localhost:18904` → Logs), no 400 spike.
-  4. Explicit `--provider-env-file <other>` still overrides the default;
-     plain launch with the setting removed behaves exactly as stock.
-  5. `npm install -g github:MotionDevLab/openclaude#feat/custom-providers`
-     on a clean shell works (see update instructions md).
+   4. Explicit `--provider-env-file <other>` still overrides the default;
+      plain launch with the setting removed behaves exactly as stock.
+   5. `/provider` → "Set active provider" lists "OpenCode Zen Router";
+      selecting it switches endpoint+model in-session (banner updates,
+      prompt answers); switching back to OpenRouter works the same way.
+   6. `npm install -g github:MotionDevLab/openclaude#feat/custom-providers`
+      on a clean shell works (see update instructions md).
 
 ## 6. Risks
 
 - Upstream is heading toward 0.4.0 (open release-please PR on the fork).
   Mitigation: tiny diffs, upstream-shaped extension points, rebase early
-  if 0.4.0 touches `providerDiscovery.ts` / `effort.ts` / `cli.tsx`.
+  if 0.4.0 touches `providerDiscovery.ts` / `effort.ts` / `cli.tsx` /
+  `ProviderManager.tsx`.
 - Some free-lane upstreams may reject `reasoning_effort` (400). v1 has
   no auto-fallback — misbehaving lane = flip `supportsEffort` off.
   (Also note the known intermittent upstream 403 flapping on free lanes —
@@ -203,9 +235,6 @@ default, and document `customProviders` + `providerEnvFile` in
 
 ## 8. Follow-ups (explicitly NOT v1)
 
-- Custom lanes as switchable entries in the `/provider` menu (v1 labels
-  the active lane only). A local second opinion scored this 0.84 in
-  favor — revisit right after v1 lands if menu switching proves painful.
 - Auto-fallback: retry without `reasoning_effort` when an upstream 400s
   it (v1: flip `supportsEffort` off per entry instead).
 
