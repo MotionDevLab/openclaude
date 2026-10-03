@@ -78,9 +78,10 @@ Touch points (source paths in fork):
   (find the settings schema module; add `customProviders` with strict
   validation: id pattern, label non-empty, baseUrl parseable).
   Validation MUST permit `http://` for loopback (`127.0.0.1`, `localhost`,
-  `::1`) — the existing `requireHttpsBaseUrl`-style helper would reject
-  the router, so custom validation is required. Non-loopback `http://`
-  stays rejected (same rationale as upstream).
+  `::1`) — reuse whatever base-URL validation the existing
+  OpenAI-compat path uses (it already accepts `http://localhost` per the
+  documented Ollama setup); do NOT impose an https-only helper.
+  Non-loopback `http://` stays rejected (same rationale as upstream).
 - **Label resolution** — `src/utils/providerDiscovery.ts`,
   `getLocalOpenAICompatibleProviderLabel()`: check custom entries FIRST
   (normalized base URL equality, ignoring trailing slashes; then model
@@ -93,6 +94,9 @@ Touch points (source paths in fork):
   show the custom label. Saved-profile flow (`OpenRouter (active)`,
   Anthropic built-in) is untouched; env-file/flag lanes resolve via the
   new lookup. (Menu switching of custom lanes is §3.4, not here.)
+  Duplicate display labels are allowed (e.g. a custom `openrouter-direct`
+  entry and the saved `OpenRouter` profile may show the same string) —
+  matching is always by `(baseUrl, model)`, never by label.
 - **Validation & secrets** — invalid entry (bad id, empty label,
   unparseable baseUrl) fails loudly at startup naming entry + field.
   No `apiKey` field on entries by design: secrets stay in env files /
