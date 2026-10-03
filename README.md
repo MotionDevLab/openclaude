@@ -159,7 +159,7 @@ Inside OpenClaude:
 - run `/provider` for guided provider setup and saved profiles
 - run `/onboard-github` for GitHub Models onboarding
 
-> **Note:** OpenClaude does not automatically load project `.env` files. We recommend using the `/provider` command for setup, which saves provider profiles and credentials in `.openclaude-profile.json`. If you prefer environment variables, export them explicitly or run `openclaude --provider-env-file .env` for provider/setup variables. Export runtime/debug knobs from your shell or launcher.
+> **Note:** OpenClaude does not automatically load project `.env` files. We recommend using the `/provider` command for setup, which saves provider profiles and credentials in `.openclaude-profile.json`. If you prefer environment variables, export them explicitly or run `openclaude --provider-env-file .env` for provider/setup variables. Export runtime/debug knobs from your shell or launcher. To boot a configured lane with zero typing, set a `providerEnvFile` settings default instead of passing the flag every time; user-defined `customProviders` lanes give it a real name in the banner and `/provider`. See [docs/custom-providers.md](docs/custom-providers.md).
 
 ### Resume or fork a conversation
 
