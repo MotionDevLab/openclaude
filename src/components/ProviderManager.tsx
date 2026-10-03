@@ -99,6 +99,12 @@ import {
 } from '../utils/providerProfiles.js'
 import { getDefaultMainLoopModelSetting } from '../utils/model/model.js'
 import {
+  buildCustomLaneProfileEnv,
+  CUSTOM_LANE_MENU_ID_PREFIX,
+  findMatchingCustomProvider,
+  getCustomProvidersFromSettings,
+} from '../utils/customProviders.js'
+import {
   clearGithubModelsToken,
   clearHydratedGithubModelsTokenFromEnv,
   GITHUB_MODELS_HYDRATED_ENV_MARKER,
@@ -1150,14 +1156,25 @@ export function ProviderManager({ mode, onDone }: Props): React.ReactNode {
   // the select menu. Without this, each arrow key press creates a new options
   // array reference, causing Select to re-render and feel sluggish.
   const hasProfiles = profiles.length > 0
-  const hasSelectableProviders = hasProfiles || githubProviderAvailable
-  // A non-Anthropic provider (a saved profile or GitHub Models) is currently
-  // active. The switch-back-to-Anthropic recovery option must stay reachable
-  // in that case even when no profiles are saved and GitHub credentials have
-  // gone away (cleared storage / removed env token); otherwise the user is
-  // stranded on an unusable provider with no way back. Scoped to the activate
-  // path only — edit/delete still require an actual profile.
-  const isNonAnthropicProviderActive = isGithubActive || activeProfileId != null
+  // User-defined `customProviders` lanes are switchable in-session like
+  // saved profiles (listed in "Set active provider", never persisted).
+  const customLanes = getCustomProvidersFromSettings()
+  const hasSelectableProviders =
+    hasProfiles || githubProviderAvailable || customLanes.length > 0
+  // A non-Anthropic provider (a saved profile, GitHub Models, or a custom
+  // lane) is currently active. The switch-back-to-Anthropic recovery option
+  // must stay reachable in that case even when no profiles are saved and GitHub
+  // credentials have gone away (cleared storage / removed env token);
+  // otherwise the user is stranded on an unusable provider with no way back.
+  // Scoped to the activate path only — edit/delete still require an actual profile.
+  const isCustomLaneActive =
+    findMatchingCustomProvider(
+      process.env.OPENAI_BASE_URL ?? process.env.OPENAI_API_BASE,
+      process.env.OPENAI_MODEL,
+      customLanes,
+    ) !== undefined
+  const isNonAnthropicProviderActive =
+    isGithubActive || activeProfileId != null || isCustomLaneActive
   const canSwitchActiveProvider =
     hasSelectableProviders || isNonAnthropicProviderActive
   const menuOptions = React.useMemo(
@@ -1213,6 +1230,7 @@ export function ProviderManager({ mode, onDone }: Props): React.ReactNode {
       hasSelectableProviders,
       canSwitchActiveProvider,
       hasProfiles,
+      customLanes.length,
       hasStoredCodexOAuthCredentials,
       hasStoredXaiOAuthCredentials,
     ],
@@ -1526,6 +1544,70 @@ export function ProviderManager({ mode, onDone }: Props): React.ReactNode {
     })
   }
 
+  async function activateCustomLane(entryId: string): Promise<void> {
+    const entry = getCustomProvidersFromSettings().find(e => e.id === entryId)
+    if (!entry) {
+      setErrorMessage('Could not change active provider.')
+      setIsActivating(false)
+      returnToMenu()
+      return
+    }
+
+    // Session-only switch through the same session-apply path as saved
+    // profiles, with a transient (never saved) profile file: nothing is
+    // persisted, so the next launch re-applies the `providerEnvFile`
+    // startup default. buildLaunchEnv merges shell-first, so pre-set the
+    // entry endpoint + model for the validation + apply below; on failure
+    // restore the previous values so a failed switch changes nothing.
+    const laneEnv = buildCustomLaneProfileEnv(entry, process.env.OPENAI_MODEL)
+    const prevEnv = {
+      CLAUDE_CODE_USE_OPENAI: process.env.CLAUDE_CODE_USE_OPENAI,
+      OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
+      OPENAI_MODEL: process.env.OPENAI_MODEL,
+    }
+    for (const [key, value] of Object.entries(laneEnv)) {
+      process.env[key] = value
+    }
+    const applyWarning = await applySavedProfileToCurrentSession({
+      profileFile: createProfileFile('openai', laneEnv),
+    })
+    if (applyWarning) {
+      for (const [key, value] of Object.entries(prevEnv)) {
+        if (value === undefined) {
+          delete process.env[key]
+        } else {
+          process.env[key] = value
+        }
+      }
+      setErrorMessage(`Could not activate ${entry.label}: ${applyWarning}`)
+      setIsActivating(false)
+      returnToMenu()
+      return
+    }
+
+    // The session model follows the applied lane: the entry default when it
+    // declares one, else whatever the session-apply path resolved (goal
+    // default for model-less wildcard switches).
+    const newModel =
+      laneEnv.OPENAI_MODEL ??
+      process.env.OPENAI_MODEL ??
+      getPrimaryModel(getDefaultMainLoopModelSetting())
+    setAppState(prev => ({
+      ...prev,
+      mainLoopModel: newModel,
+      mainLoopModelForSession: null,
+    }))
+    setStatusMessage(`Active provider: ${entry.label}`)
+    setIsActivating(false)
+    onDone({
+      action: 'activated',
+      activeProviderName: entry.label,
+      activeProviderModel: newModel,
+      message: `Provider switched to ${entry.label} (${newModel})`,
+    })
+    returnToMenu()
+  }
+
   async function activateSelectedProvider(profileId: string): Promise<void> {
     let providerLabel = 'provider'
 
@@ -1540,6 +1622,11 @@ export function ProviderManager({ mode, onDone }: Props): React.ReactNode {
       // (saveGlobalConfig, saveProfileFile, updateSettingsForSource) which can
       // block the main thread on Windows (antivirus, disk cache, NTFS metadata).
       await new Promise<void>(resolve => queueMicrotask(resolve))
+
+      if (profileId.startsWith(CUSTOM_LANE_MENU_ID_PREFIX)) {
+        await activateCustomLane(profileId.slice(CUSTOM_LANE_MENU_ID_PREFIX.length))
+        return
+      }
 
       if (profileId === GITHUB_PROVIDER_ID) {
         providerLabel = GITHUB_PROVIDER_LABEL
@@ -3970,10 +4057,8 @@ export function ProviderManager({ mode, onDone }: Props): React.ReactNode {
   }
 
   function renderMenu(): React.ReactNode {
-    // Use memoized menuOptions from component scope
-    const hasProfiles = profiles.length > 0
-    const hasSelectableProviders = hasProfiles || githubProviderAvailable
-    // canSwitchActiveProvider is derived once in the component body; reuse it
+    // hasProfiles / hasSelectableProviders / canSwitchActiveProvider are
+    // derived once in the component body (customProviders-aware); reuse them
     // here rather than recomputing so the two sites cannot drift.
 
     return (
@@ -3985,6 +4070,7 @@ export function ProviderManager({ mode, onDone }: Props): React.ReactNode {
           Active profile controls base URL, model, and API key used by this session.
         </Text>
         {statusMessage && <Text>{statusMessage}</Text>}
+        {errorMessage ? <Text color="error">{errorMessage}</Text> : null}
         <Box flexDirection="column">
           {profiles.length === 0 && !githubProviderAvailable ? (
             isGithubCredentialSourceResolved ? (
@@ -4133,10 +4219,15 @@ export function ProviderManager({ mode, onDone }: Props): React.ReactNode {
     title: string,
     emptyMessage: string,
     onSelect: (profileId: string) => void,
-    options?: { includeGithub?: boolean; includeAnthropic?: boolean },
+    options?: {
+      includeGithub?: boolean
+      includeAnthropic?: boolean
+      includeCustomProviders?: boolean
+    },
   ): React.ReactNode {
     const includeGithub = options?.includeGithub ?? false
     const includeAnthropic = options?.includeAnthropic ?? false
+    const includeCustomProviders = options?.includeCustomProviders ?? false
     const selectOptions = profiles.map(profile => ({
       value: profile.id,
       label:
@@ -4145,6 +4236,31 @@ export function ProviderManager({ mode, onDone }: Props): React.ReactNode {
           : profile.name,
       description: `${getRouteProviderTypeLabel(resolveProfileRoute(profile.provider).routeId)} · ${profile.baseUrl} · ${profile.model}`,
     }))
+
+    // User-defined `customProviders` lanes switch in-session via a transient
+    // profile file (never persisted): the next launch re-applies the
+    // `providerEnvFile` startup default. Matching is by (baseUrl, model),
+    // never by label, so duplicate display labels are allowed.
+    if (includeCustomProviders) {
+      const currentBaseUrl =
+        process.env.OPENAI_BASE_URL ?? process.env.OPENAI_API_BASE
+      const currentModel = process.env.OPENAI_MODEL
+      for (const entry of getCustomProvidersFromSettings()) {
+        const active =
+          findMatchingCustomProvider(currentBaseUrl, currentModel, [entry]) !==
+          undefined
+        const models = (entry.models ?? []).map(m => m.trim()).filter(Boolean)
+        const modelSurface =
+          models.length === 0 || (models.length === 1 && models[0] === '*')
+            ? 'discovered models'
+            : models.join(', ')
+        selectOptions.push({
+          value: `${CUSTOM_LANE_MENU_ID_PREFIX}${entry.id}`,
+          label: active ? `${entry.label} (active)` : entry.label,
+          description: `custom · ${entry.baseUrl} · ${modelSurface}`,
+        })
+      }
+    }
 
     if (includeGithub && githubProviderAvailable) {
       selectOptions.push({
@@ -4430,7 +4546,7 @@ export function ProviderManager({ mode, onDone }: Props): React.ReactNode {
         profileId => {
           void activateSelectedProvider(profileId)
         },
-        { includeGithub: true, includeAnthropic: true },
+        { includeGithub: true, includeAnthropic: true, includeCustomProviders: true },
       )
       break
     case 'select-edit':

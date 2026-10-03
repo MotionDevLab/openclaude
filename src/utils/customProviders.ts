@@ -280,6 +280,68 @@ export function findMatchingCustomProvider(
 }
 
 /**
+ * Menu id prefix for `customProviders` entries in "Set active provider".
+ * Saved profiles keep their own ids; the prefix keeps the two namespaces
+ * disjoint (matching is always by `(baseUrl, model)`, never by label).
+ */
+export const CUSTOM_LANE_MENU_ID_PREFIX = 'custom:'
+
+/**
+ * The entry's default model for an in-session lane switch: the first listed
+ * model when the entry declares a specific list, otherwise the current lane
+ * model (wildcard entries declare no opinion; model choice stays in
+ * `/model`, whose options are discovered live from the endpoint).
+ */
+export function getCustomLaneDefaultModel(
+  entry: CustomProviderEntry,
+  currentModel: string | undefined,
+): string | undefined {
+  if (!entryCoversAllModels(entry)) {
+    const first = entry.models!
+      .map(m => m.trim())
+      .find(m => m.length > 0)
+    if (first) {
+      return first
+    }
+  }
+  const current = currentModel?.trim()
+  return current && current.length > 0 ? current : undefined
+}
+
+/**
+ * Build the profile-equivalent env for an in-session lane switch, run
+ * through the same session-apply path as saved profiles
+ * (`applySavedProfileToCurrentSession` with a transient, never-saved profile
+ * file). No key material by design: credentials stay in process.env (loaded
+ * from env files), the entry contributes endpoint + model only.
+ */
+export function buildCustomLaneProfileEnv(
+  entry: CustomProviderEntry,
+  currentModel: string | undefined,
+): Record<string, string> {
+  const env: Record<string, string> = {
+    CLAUDE_CODE_USE_OPENAI: '1',
+    OPENAI_BASE_URL: entry.baseUrl.trim(),
+  }
+  const model = getCustomLaneDefaultModel(entry, currentModel)
+  if (model) {
+    env.OPENAI_MODEL = model
+  }
+  return env
+}
+
+/**
+ * Whether a `customProviders` lane is the currently active lane (env truth).
+ */
+export function isCustomLaneActive(
+  entry: CustomProviderEntry,
+  baseUrl: string | undefined,
+  model: string | undefined,
+): boolean {
+  return findMatchingCustomProvider(baseUrl, model, [entry]) !== undefined
+}
+
+/**
  * Resolve the display label for an active `(baseUrl, model)` lane through
  * the `customProviders` table. Returns undefined when no entry matches so
  * callers fall through to the existing heuristics untouched.

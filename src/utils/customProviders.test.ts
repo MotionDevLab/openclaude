@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test'
 
 import {
+  buildCustomLaneProfileEnv,
   findMatchingCustomProvider,
+  getCustomLaneDefaultModel,
   getCustomProviderLabel,
   getCustomProviderSmallModel,
   isAllowedCustomProviderBaseUrl,
+  isCustomLaneActive,
   isCustomProviderLoopbackHost,
   validateCustomProviderEntry,
   validateCustomProviders,
@@ -264,5 +267,64 @@ describe('settings-backed lookup', () => {
       fresh.getCustomProviderLabel('http://127.0.0.1:18905/zen/v1', 'muse-spark-1.3-contributor-free'),
     ).toBe('OpenCode Zen Router')
     activeCustomProvidersOverride = null
+  })
+})
+
+describe('in-session lane switch helpers (§3.4)', () => {
+  test('default model is the first listed model for specific lists', () => {
+    expect(getCustomLaneDefaultModel(ZEN_ENTRY, 'gpt-4o')).toBe(
+      'muse-spark-1.3-contributor-free',
+    )
+  })
+
+  test('wildcard entries keep the current lane model', () => {
+    const wildcard: CustomProviderEntry = {
+      id: 'wild',
+      label: 'Wild',
+      baseUrl: 'http://127.0.0.1:19999/v1',
+    }
+    const star: CustomProviderEntry = {
+      ...wildcard,
+      id: 'star',
+      models: ['*'],
+    }
+    expect(getCustomLaneDefaultModel(wildcard, 'current-model')).toBe('current-model')
+    expect(getCustomLaneDefaultModel(star, 'current-model')).toBe('current-model')
+    expect(getCustomLaneDefaultModel(wildcard, undefined)).toBeUndefined()
+    expect(getCustomLaneDefaultModel(wildcard, '  ')).toBeUndefined()
+  })
+
+  test('profile env carries endpoint + model, no key material', () => {
+    expect(buildCustomLaneProfileEnv(ZEN_ENTRY, 'gpt-4o')).toEqual({
+      CLAUDE_CODE_USE_OPENAI: '1',
+      OPENAI_BASE_URL: 'http://127.0.0.1:18905/zen/v1',
+      OPENAI_MODEL: 'muse-spark-1.3-contributor-free',
+    })
+  })
+
+  test('profile env omits the model when neither entry nor session has one', () => {
+    const wildcard: CustomProviderEntry = {
+      id: 'wild',
+      label: 'Wild',
+      baseUrl: 'http://127.0.0.1:19999/v1',
+    }
+    expect(buildCustomLaneProfileEnv(wildcard, undefined)).toEqual({
+      CLAUDE_CODE_USE_OPENAI: '1',
+      OPENAI_BASE_URL: 'http://127.0.0.1:19999/v1',
+    })
+  })
+
+  test('lane-active check matches by (baseUrl, model)', () => {
+    expect(
+      isCustomLaneActive(
+        ZEN_ENTRY,
+        'http://127.0.0.1:18905/zen/v1',
+        'muse-spark-1.3-contributor-free',
+      ),
+    ).toBe(true)
+    expect(
+      isCustomLaneActive(ZEN_ENTRY, 'http://127.0.0.1:18905/zen/v1', 'gpt-4o'),
+    ).toBe(false)
+    expect(isCustomLaneActive(ZEN_ENTRY, undefined, undefined)).toBe(false)
   })
 })
