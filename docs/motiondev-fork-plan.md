@@ -49,9 +49,22 @@ New optional top-level `settings.json` key:
     // models omitted or ["*"] = all models discovered on baseUrl
     "supportsEffort": true,                   // default false
     "effortLevels": ["low", "medium", "high"] // default exactly this
+  },
+  {
+    "id": "openrouter-direct",
+    "label": "OpenRouter",
+    "baseUrl": "https://openrouter.ai/api/v1",
+    "models": ["thinkingmachines/inkling:free"],
+    "supportsEffort": true
   }
 ]
 ```
+
+The same mechanism covers zen-router lanes AND OpenRouter-direct models:
+§3.2 keys off the matched `(baseUrl, model)` entry, so Inkling via OR
+gets the effort picker the same way spark via zen does. (Alternative
+with zero code, already working today: `ANTHROPIC_DEFAULT_*_MODEL` tier
+env vars per model — §3.2 does not remove that path.)
 
 Touch points (source paths in fork):
 
@@ -176,6 +189,24 @@ switching does not.
   (models are discovered live from the endpoint).
 - Precedence with §3.3: an in-session switch beats the startup default
   for that session only; next launch re-applies `providerEnvFile`.
+
+### 3.5 Compaction model (config only — no code)
+
+Verified in source (`src/services/compact/compact.ts` ~lines 473–486 and
+~1220, setting UI in `src/components/Settings/Config.tsx` ~line 1720
+"Model used for conversation compaction. Defaults to the main model
+when unset."):
+
+- Compaction/summary runs on the **session model by default**; a
+  dedicated model is opt-in via the `compactModel` global-config key
+  (`/config` → ModelPicker).
+- Trade-off when set to a different model: prompt-cache sharing with the
+  main conversation is disabled. On 3P lanes (zen, OR) there is no shared
+  cache anyway, so a cheaper/faster lane as `compactModel` costs
+  ~nothing — but v1 keeps the default (same model = best summary
+  fidelity). Revisit after the four code commits land.
+- Contrast with OpenCode, where compaction/summary seats are separate
+  hardcoded models (Inkling): OpenClaude needs no fork change here.
 
 ## 4. Branch & commit plan
 
