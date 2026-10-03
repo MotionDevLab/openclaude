@@ -63,14 +63,22 @@ Touch points (source paths in fork):
 - **Label resolution** — `src/utils/providerDiscovery.ts`,
   `getLocalOpenAICompatibleProviderLabel()`: check custom entries FIRST
   (normalized base URL equality, ignoring trailing slashes; then model
-  match) and return the entry label. Everything else (LM Studio, Ollama,
+  match, **case-insensitive** mirroring the tier-override convention).
+  Return the entry label. Everything else (LM Studio, Ollama,
   route matching, generic fallback) is untouched.
 - **Provider UI surfaces** — `src/commands/provider/provider.tsx`,
   `src/components/StartupScreen.ts`, `src/utils/status.tsx`: resolve the
   active lane through the same lookup so banner, `/provider`, and `/model`
   show the custom label. Saved-profile flow (`OpenRouter (active)`,
   Anthropic built-in) is untouched; env-file/flag lanes resolve via the
-  new lookup.
+  new lookup. **v1 scope: label-when-active only** — custom lanes are NOT
+  added as switchable entries in the `/provider` menu (switching lanes
+  still means relaunch with different env/model). Menu switching is a
+  §8 follow-up.
+- **Validation & secrets** — invalid entry (bad id, empty label,
+  unparseable baseUrl) fails loudly at startup naming entry + field.
+  No `apiKey` field on entries by design: secrets stay in env files /
+  shell env, never in `settings.json`.
 
 ### 3.2 Effort for declared lanes
 
@@ -96,6 +104,12 @@ Mechanism (verified in source — no new wire format invented):
   tier overrides nor this entry apply — correct precedence, document it.
 - Existing tier env overrides keep working unchanged (they are evaluated
   in the same chain; explicit tier pin wins on conflict — document this).
+- **Memoization**: `get3PModelCapabilityOverride` memoizes on env vars
+  only. The settings-based entry lookup must join the memo cache key
+  (or bypass memoization) so settings edits take effect; settings are
+  guaranteed loaded before these resolutions run (startup order in
+  `src/entrypoints/cli.tsx`), which the implementation MUST assert, not
+  assume silently.
 - The `EffortPicker` UI (`usesOpenAIEffort` / `modelUsesOpenAIEffort`
   path) needs no change: once the model resolves controllable, the
   existing OpenAI-effort picker path handles it.
@@ -129,15 +143,20 @@ Path rules: expand leading `~` to the user home dir (fixes the exact
 PowerShell `~` papercut from 2026-10-02 — Node never expands it);
 resolve relative paths against the OpenClaude config dir; missing file =
 hard error naming the resolved path (same UX as the flag today).
+Collision rule: `loadEnvFile()` only fills unset keys, and settings `env`
+applies first — so a key set in both places keeps the settings value;
+the file fills gaps only. Document this with an example.
 
 Docs: update README provider/env-file note
 ("run `openclaude --provider-env-file .env`…") to mention the settings
-default.
+default, and document `customProviders` + `providerEnvFile` in
+`docs/` (new page, linked from README).
 
 ## 4. Branch & commit plan
 
-- Feature branch from `main` @ `9a2910da`: e.g. `feat/custom-providers`.
-- Three discrete commits (one per §3.1/§3.2/§3.3) + tests per commit, so
+- Feature branch `feat/custom-providers` (already created from `main` @
+  `9a2910da`; docs commit `b3518f9` pushed).
+- Three discrete code commits (one per §3.1/§3.2/§3.3) + tests per commit, so
   rebases and upstream PRs stay separable.
 - Keep the fork's `main` tracking `Twigpine/main`; rebase policy: pin +
   on-demand (no per-release churn).
@@ -175,9 +194,29 @@ default.
   Node ≥22 for runtime. Windows build quirks possible — validate with
   `bun run build` on this machine before promising installability.
 
-## 7. Open questions (none blocking)
+## 7. Decisions (locked)
 
-- Should `supportsEffort` also accept `xhigh`/`max` via `effortLevels`?
-  (Yes in schema; lanes decide. Tier env vars already support
-  `xhigh_effort`/`max_effort` the same way.)
-- Upstream PR after v1? Optional; patches are shaped for it.
+- `effortLevels` accepts `low|medium|high|xhigh|max`; schema default is
+  exactly `["low", "medium", "high"]`. Lanes opt into more.
+  (Tier env vars already support `xhigh_effort`/`max_effort` the same way.)
+- Upstream PR after v1 is optional; patches are shaped for it.
+
+## 8. Follow-ups (explicitly NOT v1)
+
+- Custom lanes as switchable entries in the `/provider` menu (v1 labels
+  the active lane only). A local second opinion scored this 0.84 in
+  favor — revisit right after v1 lands if menu switching proves painful.
+- Auto-fallback: retry without `reasoning_effort` when an upstream 400s
+  it (v1: flip `supportsEffort` off per entry instead).
+
+## Appendix A — validation (2026-10-03)
+
+- Author gap-hunt + source re-check (chain order in `effort.ts`
+  ~lines 602–646, load order in `cli.tsx` ~402–462, allowlists in
+  `managedEnvConstants.ts`): incorporated above.
+- Laya second opinion (`laya-typed-decisions`, `--predict --json`):
+  effort mechanism `extend-tier-override-function` (0.76),
+  env-file tier `settings-tier-below-explicit-flags` (0.68),
+  label mechanism `check-custom-first-in-label-fn` (0.68),
+  load-bearing-gap `no` (0.75). Raw output: temp `laya-result.json`
+  (not committed).
