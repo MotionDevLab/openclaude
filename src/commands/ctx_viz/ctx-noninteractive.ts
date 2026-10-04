@@ -9,7 +9,7 @@ import type { Tools } from '../../Tool.js'
 import type { AgentDefinitionsResult } from '../../tools/AgentTool/loadAgentsDir.js'
 import type { Message } from '../../types/message.js'
 import { analyzeContextUsage, type ContextData } from '../../utils/analyzeContext.js'
-import { getContextWindowForModel, getModelMaxOutputTokens } from '../../utils/context.js'
+import { getContextWindowForModel, getModelMaxOutputTokens, OPENAI_FALLBACK_CONTEXT_WINDOW } from '../../utils/context.js'
 import { formatNumber, formatDuration } from '../../utils/format.js'
 import { getMessagesAfterCompactBoundary } from '../../utils/messages.js'
 import { getCanonicalName } from '../../utils/model/model.js'
@@ -163,6 +163,9 @@ export function renderCtxReport(d: RenderInput): string {
   lines.push(`    ${figures.bullet} Max output:         ${chalk.bold(formatNumber(d.maxOutput.default))} tokens${d.maxOutput.default !== d.maxOutput.upperLimit ? ` (up to ${formatNumber(d.maxOutput.upperLimit)})` : ''}`)
   if (d.autoCompactEnabled) {
     lines.push(`    ${figures.bullet} Auto-compact at:    ${chalk.bold(formatNumber(d.autoCompactThreshold))} tokens`)
+  }
+  if (d.contextWindow === OPENAI_FALLBACK_CONTEXT_WINDOW) {
+    lines.push(`    ${figures.bullet} Source:            ${chalk.yellow('fallback 128k — set modelLimits / env prefix / lane contextWindow / /set-context-window')}`)
   }
   lines.push('')
 

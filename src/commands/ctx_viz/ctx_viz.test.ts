@@ -44,7 +44,8 @@ import {
   resetSettingsCache,
   setSessionSettingsCache,
 } from '../../utils/settings/settingsCache.js'
-import type { RenderInput } from './ctx-noninteractive.js'
+import { renderCtxReport, type RenderInput } from './ctx-noninteractive.js'
+import { OPENAI_FALLBACK_CONTEXT_WINDOW } from '../../utils/context.js'
 
 function findCtx(commands: ReturnType<typeof getCommands> extends Promise<infer T> ? T : never) {
   return commands.find(c => c.name === 'ctx')
@@ -249,5 +250,51 @@ describe('/ctx command surface (PR #1610)', () => {
     // Deferred tool categories (MCP tools (deferred), System tools (deferred))
     // should be filtered out since they aren't in the model-visible context.
     expect(out).not.toContain('System tools (deferred)')
+  })
+})
+
+function fakeRenderInput(window: number): RenderInput {
+  return {
+    contextData: {
+      categories: [],
+      totalTokens: 1000,
+      maxTokens: window,
+      rawMaxTokens: window,
+      percentage: 1,
+      gridRows: [],
+      model: 'test-model',
+      memoryFiles: [],
+      mcpTools: [],
+      agents: [],
+      apiUsage: null,
+      isAutoCompactEnabled: true,
+      autoCompactThreshold: window - 50000,
+    },
+    contextWindow: window,
+    effectiveContext: window - 20000,
+    autoCompactThreshold: window - 50000,
+    maxOutput: { default: 32000, upperLimit: 64000 },
+    canonicalName: 'test-model',
+    autoCompactEnabled: true,
+    sessionInput: 0,
+    sessionOutput: 0,
+    sessionCacheRead: 0,
+    sessionCacheCreation: 0,
+    sessionCost: 0,
+    sessionApiDuration: 0,
+    sessionWallDuration: 0,
+    linesAdded: 0,
+    linesRemoved: 0,
+    modelUsageMap: {},
+  } as unknown as RenderInput
+}
+
+describe('ctx-viz fallback source flag', () => {
+  test('fallback window renders Source line, real window does not', () => {
+    const fallbackOut = renderCtxReport(fakeRenderInput(OPENAI_FALLBACK_CONTEXT_WINDOW))
+    expect(fallbackOut).toContain('Source:')
+    expect(fallbackOut).toContain('fallback')
+    const realOut = renderCtxReport(fakeRenderInput(1000000))
+    expect(realOut).not.toContain('Source:')
   })
 })
