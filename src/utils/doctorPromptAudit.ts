@@ -131,7 +131,11 @@ export function findStaleFilePaths(
       const atSpans: Array<{ start: number; end: number }> = []
 
       for (const match of line.matchAll(AT_REF_PATTERN)) {
-        const ref = match[2] ?? ''
+        const rawRef = match[2] ?? ''
+        // Trailing sentence punctuation is prose, not path: `See @./a.md.`
+        // must resolve `./a.md`, not `./a.md.`. The `.md` pattern below is
+        // already safe via its trailing word boundary.
+        const ref = rawRef.replace(/[.,;:!?)]+$/, '')
         if (!ref || isUrlRef(ref)) continue
         const fullRef = `@${ref}`
         const resolved = resolvePromptRef(fullRef, file.path)
@@ -469,12 +473,17 @@ export async function runPromptAudit(
   const scoped = pathFilter
     ? collected.files.filter(entry => entry.path.includes(pathFilter))
     : collected.files
+  // The filter scopes failed files too: a scoped run must not report
+  // unrelated load failures.
+  const failedFiles = pathFilter
+    ? collected.failedFiles.filter(entry => entry.path.includes(pathFilter))
+    : collected.failedFiles
   return renderPromptAuditReport({
     filesScanned: scoped.length,
     stalePaths: findStaleFilePaths(scoped, fs),
     staleCommands: findStaleCommandRefs(scoped, collected.knownCommandNames),
     duplicates: findDuplicateParagraphs(scoped),
     legacy: findLegacyPatterns(scoped),
-    failedFiles: collected.failedFiles,
+    failedFiles,
   })
 }

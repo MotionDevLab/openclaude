@@ -135,4 +135,12 @@ describe('prompt-audit temp-dir integration', () => {
     expect(report).toContain(tree.otherPath)
     expect(report).not.toContain(tree.mainPath)
   })
+
+  test('path filter also scopes files that failed to load', async () => {
+    const tree = await makeTree()
+    const report = await runPromptAudit(tree.dir, 'other', fakeDeps(tree))
+
+    expect(report).not.toContain(tree.brokenAgentPath)
+    expect(report).not.toContain(tree.bigSkillPath)
+  })
 })

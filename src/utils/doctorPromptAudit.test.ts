@@ -79,6 +79,29 @@ describe('findStaleFilePaths', () => {
 
     expect(findStaleFilePaths(files, memFs([]))).toEqual([])
   })
+
+  test('strips trailing sentence punctuation from @-refs', () => {
+    const files = [
+      file(
+        '/proj/rules/a.md',
+        'See @./exists.md. Then read @./gone.md, finally @./other.md!',
+      ),
+    ]
+    const fs = memFs(['/proj/rules/exists.md'])
+
+    const findings = findStaleFilePaths(files, fs)
+
+    expect(findings).toHaveLength(2)
+    expect(findings.map(finding => finding.ref)).toEqual([
+      '@./gone.md',
+      '@./other.md',
+    ])
+    expect(findings[0]).toMatchObject({
+      file: '/proj/rules/a.md',
+      line: 1,
+      resolved: '/proj/rules/gone.md',
+    })
+  })
 })
 
 describe('findStaleCommandRefs', () => {
