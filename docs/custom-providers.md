@@ -19,10 +19,15 @@ lanes AND direct models (e.g. OpenRouter):
       // models omitted or ["*"] = all models discovered on baseUrl
       "supportsEffort": true, // default false
       "effortLevels": ["low", "medium", "high"], // default exactly this
-      "smallModel": "example-small-model"
+      "smallModel": "example-small-model",
       // optional per-lane small/fast model for background chores.
       // Fallback chain: entry.smallModel → ANTHROPIC_SMALL_FAST_MODEL env
       // → OPENAI_MODEL. Omitted = divided setup off for that lane.
+      "contextWindow": 128000,
+      // optional lane-default limits (tokens). Cover every model on the
+      // lane — including models with no modelLimits entry — so a lane with
+      // many rotating models needs one line instead of one entry per model.
+      "maxOutputTokens": 8192
     }
   ],
   "providerEnvFile": "~/.openclaude/providers/example-lane.env"
@@ -48,6 +53,13 @@ What a lane gets you:
    via a transient profile (never persisted). Switching back to saved
    profiles / Anthropic uses the existing paths. Model choice inside the
    lane stays in `/model` (models are discovered live).
+
+4. **Lane-default limits** — `contextWindow` / `maxOutputTokens`
+   on the entry apply to every model served on the lane. Resolution
+   order for limits: exact env override → built-in catalog → env
+   prefix → per-model `modelLimits` → **lane default** → discovery
+   cache → descriptor default. A per-model `modelLimits` entry still
+   wins for exceptions; each field falls through independently.
 
 Precedence for effort (inside one resolution): tier env override
 `=== false` wins (not controllable, even over a matching entry), else

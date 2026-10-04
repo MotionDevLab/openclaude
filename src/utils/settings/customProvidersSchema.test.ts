@@ -17,6 +17,38 @@ test('customProviders accepts the documented example-lane entry', () => {
   expect(result.success).toBe(true)
 })
 
+test('customProviders accepts lane-default limits', () => {
+  const result = SettingsSchema().safeParse({
+    customProviders: [
+      {
+        id: 'or',
+        label: 'OpenRouter',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        contextWindow: 128_000,
+        maxOutputTokens: 8_192,
+      },
+    ],
+  })
+  expect(result.success).toBe(true)
+})
+
+test('customProviders rejects non-positive lane-default limits', () => {
+  for (const limits of [
+    { contextWindow: 0 },
+    { contextWindow: -100 },
+    { contextWindow: 1.5 },
+    { maxOutputTokens: 0 },
+    { maxOutputTokens: 'many' },
+  ]) {
+    const result = SettingsSchema().safeParse({
+      customProviders: [
+        { id: 'x', label: 'X', baseUrl: 'https://x.example/v1', ...limits },
+      ],
+    })
+    expect(result.success).toBe(false)
+  }
+})
+
 test('customProviders accepts a minimal entry (defaults apply)', () => {
   const result = SettingsSchema().safeParse({
     customProviders: [

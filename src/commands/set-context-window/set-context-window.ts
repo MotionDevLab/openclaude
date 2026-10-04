@@ -20,6 +20,9 @@ for this session only. Use /clear-context-window to remove it.
 For a permanent override (survives restart), use modelLimits in settings.json
 for custom/discovered models, for example:
   { "modelLimits": { "my-model": { "contextWindow": 1000000 } } }
+To cover every model on a customProviders lane at once, set contextWindow /
+maxOutputTokens on the lane entry instead (a per-model modelLimits entry
+still wins for exceptions).
 For a catalogued model, use an exact CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS entry;
 catalog values take precedence over modelLimits and prefix env entries.
 See docs/advanced-setup.md (Per-model limit overrides).`

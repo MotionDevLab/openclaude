@@ -10,6 +10,8 @@ export type CustomProviderEntry = {
   supportsEffort?: boolean
   effortLevels?: CustomProviderEffortLevel[]
   smallModel?: string
+  contextWindow?: number
+  maxOutputTokens?: number
 }
 
 export const CUSTOM_PROVIDER_ID_PATTERN = /^[a-z0-9-]+$/
@@ -154,6 +156,15 @@ export function validateCustomProviderEntry(entry: unknown, index: number): stri
     (typeof record.smallModel !== 'string' || record.smallModel.trim().length === 0)
   ) {
     problems.push(`${name}.smallModel: must be a non-empty model id string`)
+  }
+  for (const field of ['contextWindow', 'maxOutputTokens'] as const) {
+    const value = record[field]
+    if (
+      value !== undefined &&
+      (typeof value !== 'number' || !Number.isInteger(value) || value <= 0)
+    ) {
+      problems.push(`${name}.${field}: must be a positive integer (tokens)`)
+    }
   }
   if (record.apiKey !== undefined) {
     problems.push(
@@ -375,4 +386,62 @@ export function getCustomProviderSmallModel(
   const match = findMatchingCustomProvider(baseUrl, model, entries)
   const smallModel = match?.smallModel?.trim()
   return smallModel && smallModel.length > 0 ? smallModel : undefined
+}
+
+export type CustomProviderLaneLimits = {
+  contextWindow?: number
+  maxOutputTokens?: number
+}
+
+function stripRuntimeModelSuffix(model: string | undefined): string | undefined {
+  if (model === undefined) {
+    return undefined
+  }
+  const queryIndex = model.indexOf('?')
+  const stripped = (queryIndex === -1 ? model : model.slice(0, queryIndex)).trim()
+  return stripped.length > 0 ? stripped : undefined
+}
+
+function toPositiveInt(value: unknown): number | undefined {
+  return typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value > 0
+    ? value
+    : undefined
+}
+
+/**
+ * Resolve the lane-default limits for an active `(baseUrl, model)` lane
+ * through the `customProviders` table. Returns the declared
+ * `contextWindow` / `maxOutputTokens` of the matched entry (each
+ * independently optional; malformed values are dropped, never thrown).
+ * Returns an empty object when no entry matches or the entry declares no
+ * limits, so callers fall through to the existing resolution chain
+ * untouched. Matching tries the raw model id first, then the id with any
+ * `?...` runtime suffix stripped (e.g. `?reasoning=high` variants are the
+ * same model for scoping purposes), mirroring getBaseModelApiName in
+ * integrations/runtimeMetadata.ts. Pass `entries` explicitly in tests to
+ * avoid settings I/O.
+ */
+export function getCustomProviderLimits(
+  baseUrl: string | undefined,
+  model?: string | undefined,
+  entries?: CustomProviderEntry[],
+): CustomProviderLaneLimits {
+  const match =
+    findMatchingCustomProvider(baseUrl, model, entries) ??
+    findMatchingCustomProvider(baseUrl, stripRuntimeModelSuffix(model), entries)
+  if (!match) {
+    return {}
+  }
+  const limits: CustomProviderLaneLimits = {}
+  const contextWindow = toPositiveInt(match.contextWindow)
+  if (contextWindow !== undefined) {
+    limits.contextWindow = contextWindow
+  }
+  const maxOutputTokens = toPositiveInt(match.maxOutputTokens)
+  if (maxOutputTokens !== undefined) {
+    limits.maxOutputTokens = maxOutputTokens
+  }
+  return limits
 }

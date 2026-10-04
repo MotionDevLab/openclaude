@@ -5,6 +5,7 @@ import {
   findMatchingCustomProvider,
   getCustomLaneDefaultModel,
   getCustomProviderLabel,
+  getCustomProviderLimits,
   getCustomProviderSmallModel,
   isAllowedCustomProviderBaseUrl,
   isCustomLaneActive,
@@ -126,6 +127,41 @@ describe('validateCustomProviderEntry', () => {
   test('rejects non-object entries', () => {
     expect(validateCustomProviderEntry('nope', 3)).toEqual([
       'customProviders[3]: entry must be an object',
+    ])
+  })
+
+  test('accepts lane-default limits', () => {
+    expect(
+      validateCustomProviderEntry(
+        { ...EXAMPLE_ENTRY, contextWindow: 128_000, maxOutputTokens: 8_192 },
+        0,
+      ),
+    ).toEqual([])
+  })
+
+  test('rejects malformed lane-default limits, naming entry and field', () => {
+    expect(
+      validateCustomProviderEntry({ ...EXAMPLE_ENTRY, contextWindow: 0 }, 0),
+    ).toEqual([
+      'customProviders["example-lane"].contextWindow: must be a positive integer (tokens)',
+    ])
+    expect(
+      validateCustomProviderEntry({ ...EXAMPLE_ENTRY, contextWindow: 1.5 }, 0),
+    ).toEqual([
+      'customProviders["example-lane"].contextWindow: must be a positive integer (tokens)',
+    ])
+    expect(
+      validateCustomProviderEntry({ ...EXAMPLE_ENTRY, maxOutputTokens: -8 }, 0),
+    ).toEqual([
+      'customProviders["example-lane"].maxOutputTokens: must be a positive integer (tokens)',
+    ])
+    expect(
+      validateCustomProviderEntry(
+        { ...EXAMPLE_ENTRY, maxOutputTokens: 'many' },
+        0,
+      ),
+    ).toEqual([
+      'customProviders["example-lane"].maxOutputTokens: must be a positive integer (tokens)',
     ])
   })
 })
@@ -256,6 +292,67 @@ describe('getCustomProviderLabel / getCustomProviderSmallModel', () => {
     expect(
       getCustomProviderSmallModel('https://openrouter.ai/api/v1', 'thinkingmachines/inkling:free', entries),
     ).toBeUndefined()
+  })
+})
+
+describe('getCustomProviderLimits', () => {
+  const limited: CustomProviderEntry = {
+    id: 'limited-lane',
+    label: 'Limited',
+    baseUrl: 'https://limits.example/v1',
+    contextWindow: 128_000,
+    maxOutputTokens: 8_192,
+  }
+  const entries = [EXAMPLE_ENTRY, OR_ENTRY, limited]
+
+  test('returns the matched entry limits, each field independent', () => {
+    expect(
+      getCustomProviderLimits('https://limits.example/v1', 'any-model', entries),
+    ).toEqual({ contextWindow: 128_000, maxOutputTokens: 8_192 })
+    expect(
+      getCustomProviderLimits(
+        'https://limits.example/v1',
+        'any-model',
+        [{ ...limited, maxOutputTokens: undefined }],
+      ),
+    ).toEqual({ contextWindow: 128_000 })
+  })
+
+  test('returns {} when no entry matches or the entry declares no limits', () => {
+    expect(
+      getCustomProviderLimits('https://limits.example/v1', undefined, [OR_ENTRY]),
+    ).toEqual({})
+    expect(
+      getCustomProviderLimits('https://unknown.example/v1', 'any-model', entries),
+    ).toEqual({})
+    expect(getCustomProviderLimits(undefined, 'any-model', entries)).toEqual({})
+  })
+
+  test('strips ?runtime suffixes for scoped entries', () => {
+    const scoped: CustomProviderEntry = {
+      id: 'scoped-lane',
+      label: 'Scoped',
+      baseUrl: 'https://scoped.example/v1',
+      models: ['scoped-model'],
+      contextWindow: 64_000,
+    }
+    expect(
+      getCustomProviderLimits('https://scoped.example/v1', 'scoped-model?reasoning=high', [scoped]),
+    ).toEqual({ contextWindow: 64_000 })
+    expect(
+      getCustomProviderLimits('https://scoped.example/v1', 'other-model?reasoning=high', [scoped]),
+    ).toEqual({})
+  })
+
+  test('drops malformed values instead of throwing', () => {
+    const malformed = {
+      ...limited,
+      contextWindow: -5,
+      maxOutputTokens: 1.5,
+    } as unknown as CustomProviderEntry
+    expect(
+      getCustomProviderLimits('https://limits.example/v1', 'any-model', [malformed]),
+    ).toEqual({})
   })
 })
 

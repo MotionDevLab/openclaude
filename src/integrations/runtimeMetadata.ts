@@ -25,6 +25,7 @@ import {
   resolveRouteIdFromBaseUrl,
   type RouteDescriptor,
 } from './routeMetadata.js'
+import { getCustomProviderLimits } from '../utils/customProviders.js'
 import { parseCustomHeadersEnv } from '../utils/providerCustomHeaders.js'
 import { firstUsableCredential } from '../services/api/credentialPool.js'
 import { ZAI_GLM_OPENAI_SHIM } from './transport/zaiGlmShim.js'
@@ -530,23 +531,32 @@ export function resolveModelRuntimeLimits(options: {
     modelApiName,
     runtimeEnv,
   )
+  // Lane default from the matched `customProviders` entry, if any. Matched
+  // by the effective (baseUrl, model) lane so a lane default covers every
+  // model served on the lane — including models with no `modelLimits` entry.
+  const laneLimits = getCustomProviderLimits(
+    runtimeEnv.OPENAI_BASE_URL ?? runtimeEnv.OPENAI_API_BASE,
+    options.model,
+  )
 
   // Precedence (high → low):
   // 1. exact env override
   // 2. built-in route catalog (so `:cloud` variants keep their catalog cap over
   //    a broad base-model env *prefix*)
   // 3. env *prefix* override
-  // 4. settings.json `modelLimits` (explicit user pin)
-  // 5. discovery cache
-  // 6. model descriptor default
+  // 4. settings.json `modelLimits` (explicit per-model user pin)
+  // 5. `customProviders` lane default (explicit per-lane user pin; the
+  //    per-model pin wins because it is more specific)
+  // 6. discovery cache
+  // 7. model descriptor default
   // Discovery stays authoritative over the descriptor: a gateway's advertised
   // `context_length` is the endpoint's real cap (it may legitimately be a
   // smaller deployment/tenant limit for a globally larger model), and the
   // OpenAI-compatible response carries no signal that would let us tell a
   // synthetic gateway default apart from a real cap. Users whose gateway
   // advertises a wrong window pin it via an exact env override, `modelLimits`
-  // for an uncatalogued model, or `/set-context-window`; each applicable
-  // override sits above discovery here.
+  // for an uncatalogued model, a lane default, or `/set-context-window`; each
+  // applicable override sits above discovery here.
   // Keep `settings` strictly below `prefix` so a broad env-prefix override is
   // never silently overtaken by a settings entry — matching the scalar
   // getOpenAIContextWindow, where env (exact or prefix) beats settings.
@@ -556,6 +566,7 @@ export function resolveModelRuntimeLimits(options: {
       catalogEntry?.contextWindow ??
       externalContextWindow.prefix ??
       externalContextWindow.settings ??
+      laneLimits.contextWindow ??
       cachedCatalogEntry?.contextWindow ??
       modelDescriptor?.contextWindow,
     maxOutputTokens:
@@ -563,6 +574,7 @@ export function resolveModelRuntimeLimits(options: {
       catalogEntry?.maxOutputTokens ??
       externalMaxOutputTokens.prefix ??
       externalMaxOutputTokens.settings ??
+      laneLimits.maxOutputTokens ??
       cachedCatalogEntry?.maxOutputTokens ??
       modelDescriptor?.maxOutputTokens,
   }
