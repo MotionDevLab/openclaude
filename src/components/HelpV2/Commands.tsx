@@ -38,7 +38,7 @@ export function Commands(t0) {
       t2 = cmd_0 => ({
         label: `/${cmd_0.name}`,
         value: cmd_0.name,
-        description: truncate(formatDescriptionWithSource(cmd_0), maxWidth, true)
+        description: truncate(formatDescriptionWithSource(cmd_0) + (cmd_0.argumentHint ? ` — ${cmd_0.argumentHint}` : ''), maxWidth, true)
       });
       $[3] = maxWidth;
       $[4] = t2;

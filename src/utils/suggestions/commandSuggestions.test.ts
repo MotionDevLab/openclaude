@@ -1080,3 +1080,71 @@ describe('generateCommandSuggestions identifier filtering', () => {
     expect(names).toEqual(['/help (sosextra)'])
   })
 })
+
+describe('generateCommandSuggestions argumentHint discovery', () => {
+  function localCommand({
+    name,
+    description,
+    argumentHint,
+  }: {
+    name: string
+    description: string
+    argumentHint?: string
+  }): Command {
+    return {
+      type: 'local-jsx',
+      name,
+      description,
+      ...(argumentHint !== undefined ? { argumentHint } : {}),
+      isHidden: false,
+      progressMessage: 'running',
+      contentLength: 0,
+      getPromptForCommand: async () => [],
+    } as unknown as Command
+  }
+
+  test('doctor row contains prompt-audit via argumentHint', () => {
+    const commands = [
+      localCommand({
+        name: 'doctor',
+        description: 'Diagnose and verify your OpenClaude installation',
+        argumentHint:
+          'report [--json|--markdown] [--out file] [--include-debug] | prompt-audit [path?]',
+      }),
+    ]
+
+    const results = generateCommandSuggestions('/doctor', commands)
+
+    expect(results.map(item => item.displayText)).toContain('/doctor')
+    expect(results[0]?.description).toContain('prompt-audit')
+  })
+
+  test('hint-less command description is unchanged', () => {
+    const commands = [
+      localCommand({ name: 'model', description: 'Change model' }),
+    ]
+
+    const results = generateCommandSuggestions('/model', commands)
+
+    expect(results[0]?.displayText).toBe('/model')
+    expect(results[0]?.description).toBe('Change model')
+  })
+
+  test('prompt-audit query surfaces /doctor via argumentHint', () => {
+    const commands = [
+      localCommand({
+        name: 'doctor',
+        description: 'Diagnose and verify your OpenClaude installation',
+        argumentHint:
+          'report [--json|--markdown] [--out file] [--include-debug] | prompt-audit [path?]',
+      }),
+      localCommand({ name: 'model', description: 'Change model' }),
+    ]
+
+    const names = generateCommandSuggestions('/prompt-audit', commands).map(
+      item => item.displayText,
+    )
+
+    expect(names).toContain('/doctor')
+  })
+})

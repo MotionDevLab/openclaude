@@ -490,7 +490,8 @@ function getRenderedCommandDescription(cmd: Command): string {
       description +
       (cmd.type === 'prompt' && cmd.argNames?.length
         ? ` (arguments: ${cmd.argNames.join(', ')})`
-        : '')
+        : '') +
+      (cmd.argumentHint ? ` — ${cmd.argumentHint}` : '')
     )
   } catch (err) {
     warnBrokenCommand(safeCommandName(cmd) ?? 'unknown', err)
@@ -689,7 +690,9 @@ export function generateCommandSuggestions(
   const includesQuery = (value: string) => value.includes(query)
   const startsWithQuery = (value: string) => value.startsWith(query)
   const matchesIdentifier = (item: (typeof withMeta)[number]) =>
-    includesQuery(item.name) || item.aliases.some(includesQuery)
+    includesQuery(item.name) ||
+    item.aliases.some(includesQuery) ||
+    (item.command.argumentHint?.toLowerCase().includes(query) ?? false)
 
   const getMatchRank = (item: (typeof withMeta)[number]): number => {
     if (item.name === query) return 0
