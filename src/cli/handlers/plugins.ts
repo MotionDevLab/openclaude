@@ -100,49 +100,16 @@ function printValidationResult(result: ValidationResult): void {
 // plugin validate
 export async function pluginValidateHandler(
   manifestPath: string,
-  options: { cowork?: boolean },
+  options: { cowork?: boolean; json?: boolean },
 ): Promise<void> {
   if (options.cowork) setUseCoworkPlugins(true)
+  // Compute inside try, emit outside: exits below must not be swallowed by
+  // the catch (which maps unexpected errors to exit 2).
+  let result: ValidationResult
+  let contentResults: ValidationResult[]
   try {
-    const result = await validateManifest(manifestPath)
-
-    // biome-ignore lint/suspicious/noConsole:: intentional console output
-    console.log(`Validating ${result.fileType} manifest: ${result.filePath}\n`)
-    printValidationResult(result)
-
-    // If this is a plugin manifest located inside a .claude-plugin directory,
-    // also validate the plugin's content files (skills, agents, commands,
-    // hooks). Works whether the user passed a directory or the plugin.json
-    // path directly.
-    let contentResults: ValidationResult[] = []
-    if (result.fileType === 'plugin') {
-      const manifestDir = dirname(result.filePath)
-      if (basename(manifestDir) === '.claude-plugin') {
-        contentResults = await validatePluginContents(dirname(manifestDir))
-        for (const r of contentResults) {
-          // biome-ignore lint/suspicious/noConsole:: intentional console output
-          console.log(`Validating ${r.fileType}: ${r.filePath}\n`)
-          printValidationResult(r)
-        }
-      }
-    }
-
-    const allSuccess = result.success && contentResults.every(r => r.success)
-    const hasWarnings =
-      result.warnings.length > 0 ||
-      contentResults.some(r => r.warnings.length > 0)
-
-    if (allSuccess) {
-      cliOk(
-        hasWarnings
-          ? `${figures.tick} Validation passed with warnings`
-          : `${figures.tick} Validation passed`,
-      )
-    } else {
-      // biome-ignore lint/suspicious/noConsole:: intentional console output
-      console.log(`${figures.cross} Validation failed`)
-      process.exit(1)
-    }
+    result = await validateManifest(manifestPath)
+    contentResults = await collectPluginContentResults(result)
   } catch (error) {
     logError(error)
     // biome-ignore lint/suspicious/noConsole:: intentional console output
@@ -151,6 +118,60 @@ export async function pluginValidateHandler(
     )
     process.exit(2)
   }
+
+  const allSuccess = result.success && contentResults.every(r => r.success)
+  const hasWarnings =
+    result.warnings.length > 0 ||
+    contentResults.some(r => r.warnings.length > 0)
+
+  if (options.json) {
+    process.stdout.write(
+      jsonStringify(
+        { success: allSuccess, manifest: result, contents: contentResults },
+        null,
+        2,
+      ) + '\n',
+    )
+    process.exit(allSuccess ? 0 : 1)
+    return
+  }
+
+  // biome-ignore lint/suspicious/noConsole:: intentional console output
+  console.log(`Validating ${result.fileType} manifest: ${result.filePath}\n`)
+  printValidationResult(result)
+
+  for (const r of contentResults) {
+    // biome-ignore lint/suspicious/noConsole:: intentional console output
+    console.log(`Validating ${r.fileType}: ${r.filePath}\n`)
+    printValidationResult(r)
+  }
+
+  if (allSuccess) {
+    cliOk(
+      hasWarnings
+        ? `${figures.tick} Validation passed with warnings`
+        : `${figures.tick} Validation passed`,
+    )
+  } else {
+    // biome-ignore lint/suspicious/noConsole:: intentional console output
+    console.log(`${figures.cross} Validation failed`)
+    process.exit(1)
+  }
+}
+
+/**
+ * Collect content validation results for a plugin manifest located inside
+ * a .claude-plugin directory — skills, agents, commands, hooks. Works
+ * whether the user passed a directory or the plugin.json path directly.
+ * Anything else yields no content results.
+ */
+async function collectPluginContentResults(
+  result: ValidationResult,
+): Promise<ValidationResult[]> {
+  if (result.fileType !== 'plugin') return []
+  const manifestDir = dirname(result.filePath)
+  if (basename(manifestDir) !== '.claude-plugin') return []
+  return validatePluginContents(dirname(manifestDir))
 }
 
 // plugin list (lines 5217–5416)

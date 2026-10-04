@@ -4013,8 +4013,9 @@ async function run(): Promise<CommanderCommand> {
 
   // Plugin validate command
   const pluginCmd = program.command('plugin').alias('plugins').description('Manage OpenClaude plugins').configureHelp(createSortedHelpConfig());
-  pluginCmd.command('validate <path>').description('Validate a plugin or marketplace manifest').addOption(coworkOption()).action(async (manifestPath: string, options: {
+  pluginCmd.command('validate <path>').description('Validate a plugin or marketplace manifest').option('--json', 'Output as JSON').addOption(coworkOption()).action(async (manifestPath: string, options: {
     cowork?: boolean;
+    json?: boolean;
   }) => {
     const {
       pluginValidateHandler
