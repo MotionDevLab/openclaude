@@ -1007,3 +1007,22 @@ describe('autoCompactIfNeeded circuit breaker', () => {
     expect(result.nextRetryAtMs).toBeUndefined()
   })
 })
+
+describe('message-count vs token threshold disambiguation', () => {
+  test('forced message-count bypasses token threshold on tiny transcript', async () => {
+    const { shouldAutoCompact } = await importAutoCompact()
+    const tiny = [userMessage('small-1'), userMessage('small-2')]
+    expect(
+      await shouldAutoCompact(
+        tiny,
+        'claude-sonnet-4',
+        'repl_main_thread',
+        0,
+        'message-count',
+      ),
+    ).toBe(true)
+    expect(
+      await shouldAutoCompact(tiny, 'claude-sonnet-4', 'repl_main_thread'),
+    ).toBe(false)
+  })
+})
