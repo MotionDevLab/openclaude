@@ -2,6 +2,7 @@ import { afterEach, describe, expect, mock, test } from 'bun:test'
 import { isValidElement } from 'react'
 import {
   createDoctorCommandCall,
+  runDoctorPromptAuditCommand,
   runDoctorReportCommand,
   splitDoctorArgs,
 } from './doctor.js'
@@ -181,5 +182,73 @@ describe('/doctor report', () => {
       '--out',
       String.raw`C:\Users\Alice\report.md`,
     ])
+  })
+})
+
+describe('/doctor prompt-audit', () => {
+  const reportDependencies = () => ({
+    parseIssueReportArgs: mock(() => ({
+      format: 'markdown' as const,
+      outFile: null,
+      includeDebug: false,
+      redacted: true as const,
+    })),
+    renderIssueReport: mock(async () => '# report'),
+    writeIssueReport: mock(() => '/tmp/report.md'),
+  })
+
+  test('emits the audit report through onDone', async () => {
+    const runPromptAudit = mock(async () => '# prompt audit')
+    const onDone = mock(() => {})
+
+    const result = await runDoctorPromptAuditCommand(['rules'], onDone, {
+      runPromptAudit,
+    })
+
+    expect(result).toBeNull()
+    expect(runPromptAudit).toHaveBeenCalledWith(process.cwd(), 'rules')
+    expect(onDone).toHaveBeenCalledWith('# prompt audit', {
+      display: 'system',
+    })
+  })
+
+  test('passes no path filter when omitted', async () => {
+    const runPromptAudit = mock(async () => '# prompt audit')
+
+    await runDoctorPromptAuditCommand([], mock(() => {}), { runPromptAudit })
+
+    expect(runPromptAudit).toHaveBeenCalledWith(process.cwd(), undefined)
+  })
+
+  test('routes prompt-audit arguments through the slash command entrypoint', async () => {
+    const runPromptAudit = mock(async () => '# prompt audit')
+    const call = createDoctorCommandCall(reportDependencies(), {
+      runPromptAudit,
+    })
+    const onDone = mock(() => {})
+
+    const result = await call(onDone as never, {} as never, 'prompt-audit rules')
+
+    expect(result).toBeNull()
+    expect(runPromptAudit).toHaveBeenCalledWith(process.cwd(), 'rules')
+    expect(onDone).toHaveBeenCalledWith('# prompt audit', {
+      display: 'system',
+    })
+  })
+
+  test('still falls back to the Doctor screen for other arguments', async () => {
+    const runPromptAudit = mock(async () => '# prompt audit')
+    const call = createDoctorCommandCall(reportDependencies(), {
+      runPromptAudit,
+    })
+
+    const result = await call(
+      mock(() => {}) as never,
+      {} as never,
+      'prompt-audit-typo',
+    )
+
+    expect(isValidElement(result)).toBe(true)
+    expect(runPromptAudit).not.toHaveBeenCalled()
   })
 })
