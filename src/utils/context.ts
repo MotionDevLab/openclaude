@@ -218,7 +218,7 @@ function warnUnknownIntegrationRuntimeLimits(model: string): void {
       `Fix (any one, model-agnostic): settings.json modelLimits {"${model}": {"contextWindow": N}}, ` +
       `or env CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS '{"${model}": N}' (prefix "muse-spark" covers family), ` +
       `or customProviders lane {"contextWindow": N}, ` +
-      `or session-only /set-context-window ${model} N. ` +
+      `or /set-context-window ${model} N (--save persists it). ` +
       `Add it to src/integrations/models for accurate compaction.`,
     { level: 'warn' },
   )
