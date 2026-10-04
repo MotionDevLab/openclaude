@@ -64,6 +64,15 @@ function safeCommandAliases(
   }
 }
 
+function safeArgumentHint(command: Command): string | undefined {
+  try {
+    return command.argumentHint
+  } catch (err) {
+    warnBrokenCommand(safeCommandName(command) ?? 'unknown', err)
+    return undefined
+  }
+}
+
 // Treat these characters as word separators for command search
 const SEPARATORS = /[:_-]/g
 
@@ -692,7 +701,7 @@ export function generateCommandSuggestions(
   const matchesIdentifier = (item: (typeof withMeta)[number]) =>
     includesQuery(item.name) ||
     item.aliases.some(includesQuery) ||
-    (item.command.argumentHint?.toLowerCase().includes(query) ?? false)
+    (safeArgumentHint(item.command)?.toLowerCase().includes(query) ?? false)
 
   const getMatchRank = (item: (typeof withMeta)[number]): number => {
     if (item.name === query) return 0

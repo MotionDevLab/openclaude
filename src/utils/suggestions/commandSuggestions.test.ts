@@ -1147,4 +1147,34 @@ describe('generateCommandSuggestions argumentHint discovery', () => {
 
     expect(names).toContain('/doctor')
   })
+
+  test('a throwing argumentHint getter does not break typed suggestions', () => {
+    const brokenHint: Command = {
+      type: 'local-jsx',
+      name: 'doctor',
+      get description(): string {
+        return 'Diagnose things'
+      },
+      get argumentHint(): string {
+        throw new Error('no hint')
+      },
+      isHidden: false,
+      progressMessage: 'running',
+      contentLength: 0,
+      getPromptForCommand: async () => [],
+    } as unknown as Command
+    const provider = localCommand({
+      name: 'provider',
+      description: 'Manage providers',
+    })
+
+    expect(() =>
+      generateCommandSuggestions('/prov', [brokenHint, provider]),
+    ).not.toThrow()
+    expect(
+      generateCommandSuggestions('/prov', [brokenHint, provider]).map(
+        item => item.displayText,
+      ),
+    ).toContain('/provider')
+  })
 })

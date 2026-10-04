@@ -5,6 +5,7 @@ import {
   findLegacyPatterns,
   findStaleCommandRefs,
   findStaleFilePaths,
+  isRepoShapedRef,
   LEGACY_PROMPT_PATTERNS,
   renderPromptAuditReport,
   type PromptAuditFile,
@@ -141,6 +142,23 @@ describe('findStaleFilePaths', () => {
     const findings = findStaleFilePaths(files, memFs([]))
 
     expect(findings.map(finding => finding.ref)).toEqual(['@./missing.md'])
+  })
+})
+
+describe('isRepoShapedRef', () => {
+  test.each([
+    ['owner/repo', true],
+    ['owner/repo/sub/path', true],
+    ['openai/gpt-4', true],
+    ['./missing.md', false],
+    ['/abs/x', false],
+    ['~/x', false],
+    ['a/b.md', false],
+    ['owner/repo/file.md', false],
+    ['Makefile', false],
+    ['user', false],
+  ])('isRepoShapedRef(%s) is %s', (ref, expected) => {
+    expect(isRepoShapedRef(ref)).toBe(expected)
   })
 })
 
