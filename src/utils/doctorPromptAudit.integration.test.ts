@@ -143,4 +143,110 @@ describe('prompt-audit temp-dir integration', () => {
     expect(report).not.toContain(tree.brokenAgentPath)
     expect(report).not.toContain(tree.bigSkillPath)
   })
+
+  test('empty loader result renders the honest empty message', async () => {
+    const tree = await makeTree()
+    const emptyDeps: PromptAuditLoaderDeps = {
+      getMemoryFiles: async () => [],
+      loadMarkdownFilesForSubdir: async () => [],
+      getAgentDefinitionsWithOverrides: async () => ({}),
+      getCommands: async () => [{ name: 'doctor' }],
+      getSkillDirCommands: async () => [],
+      getOversizedMarkdownSkips: () => [],
+    }
+    const report = await runPromptAudit(tree.dir, 'no-such-substring-xyz', emptyDeps)
+
+    expect(report).toContain('no prompt files found')
+    expect(report).toContain('Nothing was audited')
+    expect(report).not.toContain('no issues found')
+  })
+})
+
+describe('prompt-audit directory-walk mode', () => {
+  test('walks a real directory and finds stale, legacy, and duplicate findings', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'prompt-audit-dir-'))
+    await mkdir(join(dir, 'docs', 'sub'), { recursive: true })
+    await writeFile(
+      join(dir, 'docs', 'a.md'),
+      [
+        '# A',
+        'See @./missing.md for details.',
+        'Run /ghost-cmd to deploy.',
+        'Set {$project} here.',
+        '',
+        SHARED_PARAGRAPH,
+        '',
+      ].join('\n'),
+    )
+    await writeFile(
+      join(dir, 'docs', 'sub', 'b.md'),
+      ['# B', '', SHARED_PARAGRAPH, ''].join('\n'),
+    )
+    await writeFile(join(dir, 'docs', 'notes.txt'), 'ignored prose')
+    const deps: PromptAuditLoaderDeps = {
+      getMemoryFiles: async () => [],
+      loadMarkdownFilesForSubdir: async () => [],
+      getAgentDefinitionsWithOverrides: async () => ({}),
+      getCommands: async () => [{ name: 'doctor' }],
+      getSkillDirCommands: async () => [],
+      getOversizedMarkdownSkips: () => [],
+    }
+
+    const report = await runPromptAudit(dir, join(dir, 'docs'), deps)
+
+    expect(report).toContain('2 file(s) scanned')
+    expect(report).toContain('missing.md')
+    expect(report).toContain('ghost-cmd')
+    expect(report).toContain('legacy-variable')
+    expect(report).toContain('Duplicate blocks')
+  })
+
+  test('existing directory wins over substring interpretation (relative path)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'prompt-audit-dispatch-'))
+    await mkdir(join(dir, 'docs'), { recursive: true })
+    await writeFile(join(dir, 'docs', 'walked.md'), '# Walked\n\nRun /ghost-cmd here.\n')
+    const loaderPath = join(dir, 'unrelated-docs-mention.md')
+    const deps: PromptAuditLoaderDeps = {
+      getMemoryFiles: async () => [{ path: loaderPath, content: '# Loader\n\nClean.\n' }],
+      loadMarkdownFilesForSubdir: async () => [],
+      getAgentDefinitionsWithOverrides: async () => ({}),
+      getCommands: async () => [{ name: 'doctor' }],
+      getSkillDirCommands: async () => [],
+      getOversizedMarkdownSkips: () => [],
+    }
+
+    const report = await runPromptAudit(dir, 'docs', deps)
+
+    expect(report).toContain(join(dir, 'docs', 'walked.md'))
+    expect(report).toContain('ghost-cmd')
+    expect(report).not.toContain(loaderPath)
+  })
+
+  test('plain string still filters loader files when no directory matches', async () => {
+    const tree = await makeTree()
+    const report = await runPromptAudit(tree.dir, 'other', fakeDeps(tree))
+
+    expect(report).toContain('1 file(s) scanned')
+    expect(report).toContain(tree.otherPath)
+  })
+
+  test('empty directory renders the honest empty message with the scope', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'prompt-audit-empty-'))
+    await mkdir(join(dir, 'empty-docs'), { recursive: true })
+    await writeFile(join(dir, 'empty-docs', 'notes.txt'), 'no markdown here')
+    const deps: PromptAuditLoaderDeps = {
+      getMemoryFiles: async () => [],
+      loadMarkdownFilesForSubdir: async () => [],
+      getAgentDefinitionsWithOverrides: async () => ({}),
+      getCommands: async () => [{ name: 'doctor' }],
+      getSkillDirCommands: async () => [],
+      getOversizedMarkdownSkips: () => [],
+    }
+
+    const report = await runPromptAudit(dir, join(dir, 'empty-docs'), deps)
+
+    expect(report).toContain('no prompt files found')
+    expect(report).toContain('Nothing was audited')
+    expect(report).not.toContain('no issues found')
+  })
 })

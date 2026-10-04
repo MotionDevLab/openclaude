@@ -1,6 +1,7 @@
 import { existsSync as nodeExistsSync } from 'fs'
+import { readdir as nodeReaddir, readFile as nodeReadFile } from 'fs/promises'
 import { homedir } from 'os'
-import { dirname, join, normalize } from 'path'
+import { dirname, isAbsolute, join, normalize } from 'path'
 import { getCommands } from '../commands.js'
 import { getSkillDirCommands } from '../skills/loadSkillsDir.js'
 import { getAgentDefinitionsWithOverrides } from '../tools/AgentTool/loadAgentsDir.js'
@@ -16,8 +17,17 @@ export type PromptAuditFile = {
   source: string
 }
 
+export type PromptAuditDirEntry = {
+  name: string
+  isDirectory: () => boolean
+  isFile: () => boolean
+  isSymbolicLink: () => boolean
+}
+
 export type PromptAuditFs = {
   existsSync: (path: string) => boolean
+  readdir?: (dir: string) => Promise<PromptAuditDirEntry[]>
+  readFile?: (path: string) => Promise<string>
 }
 
 export type StalePathFinding = {
@@ -59,6 +69,7 @@ export type PromptAuditResult = {
   duplicates: DuplicateBlockFinding[]
   legacy: LegacyPatternFinding[]
   failedFiles: FailedFileFinding[]
+  truncated?: boolean
 }
 
 /**
@@ -92,6 +103,98 @@ const DUPLICATE_MIN_CHARS = 80
 const DUPLICATE_PREVIEW_CHARS = 120
 
 const REPORT_MAX_PER_CATEGORY = 20
+
+/** Max *.md files a directory walk collects before truncating with a note. */
+export const PROMPT_AUDIT_DIR_MAX_FILES = 500
+
+/** Max walk depth below the audit root; bounds deep trees (symlinks are not followed). */
+export const PROMPT_AUDIT_DIR_MAX_DEPTH = 20
+
+async function defaultReaddir(dir: string): Promise<PromptAuditDirEntry[]> {
+  const entries = await nodeReaddir(dir, { withFileTypes: true })
+  return entries.map(entry => ({
+    name: typeof entry.name === 'string' ? entry.name : String(entry.name),
+    isDirectory: () => entry.isDirectory(),
+    isFile: () => entry.isFile(),
+    isSymbolicLink: () => entry.isSymbolicLink(),
+  }))
+}
+
+async function defaultReadFile(path: string): Promise<string> {
+  return nodeReadFile(path, 'utf8')
+}
+
+function isSkippedDir(name: string): boolean {
+  return name.startsWith('.') || name === 'node_modules'
+}
+
+/** Recursively collects *.md files (case-insensitive) under root. */
+export async function collectPromptAuditFilesFromDir(
+  root: string,
+  fs: PromptAuditFs = { existsSync: nodeExistsSync },
+): Promise<{ files: PromptAuditFile[]; failedFiles: FailedFileFinding[]; truncated: boolean }> {
+  const readdir = fs.readdir ?? defaultReaddir
+  const readFile = fs.readFile ?? defaultReadFile
+  const files: PromptAuditFile[] = []
+  const failedFiles: FailedFileFinding[] = []
+  let truncated = false
+  const stack: Array<{ dir: string; depth: number }> = [{ dir: root, depth: 0 }]
+
+  while (stack.length > 0) {
+    const current = stack.pop()
+    if (!current || current.depth > PROMPT_AUDIT_DIR_MAX_DEPTH) continue
+    let entries: PromptAuditDirEntry[]
+    try {
+      entries = await readdir(current.dir)
+    } catch (error) {
+      failedFiles.push({
+        path: current.dir,
+        reason: error instanceof Error ? error.message : String(error),
+      })
+      continue
+    }
+    for (const entry of entries) {
+      if (files.length >= PROMPT_AUDIT_DIR_MAX_FILES) {
+        truncated = true
+        break
+      }
+      const fullPath = join(current.dir, entry.name)
+      if (entry.isSymbolicLink()) continue
+      if (entry.isDirectory()) {
+        if (isSkippedDir(entry.name)) continue
+        stack.push({ dir: fullPath, depth: current.depth + 1 })
+      } else if (/\.md$/i.test(entry.name)) {
+        try {
+          const content = await readFile(fullPath)
+          files.push({ path: fullPath, content, source: 'dir' })
+        } catch (error) {
+          failedFiles.push({
+            path: fullPath,
+            reason: error instanceof Error ? error.message : String(error),
+          })
+        }
+      }
+    }
+    if (truncated) break
+  }
+
+  if (files.length > PROMPT_AUDIT_DIR_MAX_FILES) {
+    truncated = true
+    files.length = PROMPT_AUDIT_DIR_MAX_FILES
+  }
+
+  return { files, failedFiles, truncated }
+}
+
+async function isExistingDirectory(path: string, fs: PromptAuditFs): Promise<boolean> {
+  const readdir = fs.readdir ?? defaultReaddir
+  try {
+    await readdir(path)
+    return true
+  } catch {
+    return false
+  }
+}
 
 function toDisplayPath(path: string): string {
   return path.replace(/\\/g, '/')
@@ -440,7 +543,7 @@ function renderSection<T>(
 }
 
 /** Renders a capped plain-text report (per-category cap + overflow lines). */
-export function renderPromptAuditReport(result: PromptAuditResult): string {
+export function renderPromptAuditReport(result: PromptAuditResult, scope?: string): string {
   const total =
     result.stalePaths.length +
     result.staleCommands.length +
@@ -448,8 +551,15 @@ export function renderPromptAuditReport(result: PromptAuditResult): string {
     result.legacy.length +
     result.failedFiles.length
   const header = `Prompt audit: ${result.filesScanned} file(s) scanned, `
+  const overflowNote =
+    result.truncated === true
+      ? `\nNote: directory walk capped at ${PROMPT_AUDIT_DIR_MAX_FILES} files; narrow the path for a complete audit.`
+      : ''
   if (total === 0) {
-    return `${header}no issues found.`
+    if (result.filesScanned === 0) {
+      return `Prompt audit: no prompt files found for "${scope ?? 'all files'}". Nothing was audited.${overflowNote}`
+    }
+    return `${header}no issues found.${overflowNote}`
   }
 
   return [
@@ -469,12 +579,14 @@ export function renderPromptAuditReport(result: PromptAuditResult): string {
     renderSection('Files that failed to load', result.failedFiles, finding =>
       `${finding.path} — ${finding.reason}`,
     ),
-  ].join('\n')
+  ].join('\n') + overflowNote
 }
 
 /**
  * Full audit: collect via existing loaders, run the five deterministic
- * detectors, render a capped report. `pathFilter` scopes files by substring.
+ * detectors, render a capped report. `pathFilter` scopes files by substring —
+ * unless it resolves to an existing directory (relative paths against `cwd`),
+ * in which case that directory is walked for *.md files instead.
  */
 export async function runPromptAudit(
   cwd: string,
@@ -482,6 +594,34 @@ export async function runPromptAudit(
   deps: PromptAuditLoaderDeps = defaultPromptAuditLoaderDeps,
   fs: PromptAuditFs = { existsSync: nodeExistsSync },
 ): Promise<string> {
+  if (pathFilter) {
+    const candidate = isAbsolute(pathFilter)
+      ? normalize(pathFilter)
+      : normalize(join(cwd, pathFilter))
+    if (await isExistingDirectory(candidate, fs)) {
+      const walked = await collectPromptAuditFilesFromDir(candidate, fs)
+      const [commands, skillCommands] = await Promise.all([
+        deps.getCommands(cwd),
+        deps.getSkillDirCommands(cwd),
+      ])
+      const known = new Set<string>()
+      for (const command of [...commands, ...skillCommands]) {
+        known.add(command.name.toLowerCase())
+      }
+      return renderPromptAuditReport(
+        {
+          filesScanned: walked.files.length,
+          stalePaths: findStaleFilePaths(walked.files, fs),
+          staleCommands: findStaleCommandRefs(walked.files, known),
+          duplicates: findDuplicateParagraphs(walked.files),
+          legacy: findLegacyPatterns(walked.files),
+          failedFiles: walked.failedFiles,
+          truncated: walked.truncated,
+        },
+        pathFilter,
+      )
+    }
+  }
   const collected = await collectPromptAuditFiles(cwd, deps)
   const scoped = pathFilter
     ? collected.files.filter(entry => entry.path.includes(pathFilter))
@@ -491,12 +631,15 @@ export async function runPromptAudit(
   const failedFiles = pathFilter
     ? collected.failedFiles.filter(entry => entry.path.includes(pathFilter))
     : collected.failedFiles
-  return renderPromptAuditReport({
-    filesScanned: scoped.length,
-    stalePaths: findStaleFilePaths(scoped, fs),
-    staleCommands: findStaleCommandRefs(scoped, collected.knownCommandNames),
-    duplicates: findDuplicateParagraphs(scoped),
-    legacy: findLegacyPatterns(scoped),
-    failedFiles,
-  })
+  return renderPromptAuditReport(
+    {
+      filesScanned: scoped.length,
+      stalePaths: findStaleFilePaths(scoped, fs),
+      staleCommands: findStaleCommandRefs(scoped, collected.knownCommandNames),
+      duplicates: findDuplicateParagraphs(scoped),
+      legacy: findLegacyPatterns(scoped),
+      failedFiles,
+    },
+    pathFilter ?? 'all files',
+  )
 }
