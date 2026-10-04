@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import chalk from 'chalk'
 
 import { filterAvailableCatalogEntries } from '../../integrations/index.js'
 import { buildRouteCatalogModelOptions, mergeRouteCatalogEntries } from './routeCatalogOptions.js'
@@ -18,14 +19,16 @@ describe('buildRouteCatalogModelOptions', () => {
       {
         value: 'deepseek-chat',
         label: 'DeepSeek Chat',
-        description: 'Provider: DeepSeek',
-        descriptionForModel: 'Provider: DeepSeek (deepseek-chat)',
+        description: `${chalk.yellow('⚠ fallback 128K')} · Provider: DeepSeek`,
+        descriptionForModel: `${chalk.yellow('⚠ fallback 128K')} · Provider: DeepSeek (deepseek-chat)`,
+        dimDescription: false,
       },
       {
         value: 'deepseek-v4-pro',
         label: 'DeepSeek V4 Pro',
-        description: 'Recommended · Provider: DeepSeek',
-        descriptionForModel: 'Recommended · Provider: DeepSeek (deepseek-v4-pro)',
+        description: `Recommended · ${chalk.yellow('⚠ fallback 128K')} · Provider: DeepSeek`,
+        descriptionForModel: `Recommended · ${chalk.yellow('⚠ fallback 128K')} · Provider: DeepSeek (deepseek-v4-pro)`,
+        dimDescription: false,
       },
     ])
   })
@@ -51,7 +54,25 @@ describe('buildRouteCatalogModelOptions', () => {
       },
     ])
 
-    expect(options[0]?.description).toBe('Free · Provider: Gitlawb Opengateway')
+    expect(options[0]?.description).toBe(`${chalk.yellow('⚠ fallback 128K')} · Free · Provider: Gitlawb Opengateway`)
+    expect(options[0]?.dimDescription).toBe(false)
+  })
+})
+
+describe('picker fallback marking', () => {
+  test('missing window shows yellow fallback, known window shows green size', () => {
+    const options = buildRouteCatalogModelOptions('OpenCode Zen', [
+      { id: 'muse-spark-1.3-free', apiName: 'muse-spark-1.3-free', label: 'Muse Spark 1.3 Free' },
+      { id: 'muse-spark-1.2-free', apiName: 'muse-spark-1.2-free', label: 'Muse Spark 1.2 Free', contextWindow: 1048576 },
+    ])
+    const missingOpt = options.find(o => o.value === 'muse-spark-1.3-free')!
+    expect(missingOpt.description).toContain('fallback 128K')
+    expect(missingOpt.description).toContain('Provider: OpenCode Zen')
+    expect(missingOpt.dimDescription).toBe(false)
+    const knownOpt = options.find(o => o.value === 'muse-spark-1.2-free')!
+    expect(knownOpt.description).toContain('1M context')
+    expect(knownOpt.description).not.toContain('fallback')
+    expect(knownOpt.dimDescription).toBeUndefined()
   })
 })
 
