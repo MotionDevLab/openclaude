@@ -6416,7 +6416,10 @@ test('ProviderManager activating a custom lane switches the session without pers
   const onDone = mock(() => {})
   const applySavedProfileToCurrentSession = mock(async () => null)
   const setActiveProviderProfile = mock(() => null)
-  const appStateChanges: Array<{ newState: any; oldState: any }> = []
+  const appStateChanges: Array<{
+    newState: { mainLoopModel?: unknown }
+    oldState: unknown
+  }> = []
 
   mockProviderManagerDependencies(() => undefined, async () => undefined, {
     applySavedProfileToCurrentSession,
@@ -6430,7 +6433,9 @@ test('ProviderManager activating a custom lane switches the session without pers
   const mounted = await mountProviderManager(ProviderManager, {
     onDone,
     onChangeAppState: args => {
-      appStateChanges.push(args as { newState: any; oldState: any })
+      appStateChanges.push(
+        args as { newState: { mainLoopModel?: unknown }; oldState: unknown },
+      )
     },
   })
 
