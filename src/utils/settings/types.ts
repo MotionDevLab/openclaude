@@ -129,7 +129,7 @@ export const ModelPricingDiagnosticSchema = z.unknown().superRefine(
 
 /**
  * One user-defined provider lane (`customProviders` entry). Mechanism, not
- * hardcode: zen-router lanes and OpenRouter-direct models share this shape.
+ * hardcode: gateway lanes and OpenRouter-direct models share this shape.
  * Secrets are deliberately absent — API keys stay in env files / shell env,
  * never in `settings.json`. Plaintext `http://` base URLs are restricted to
  * loopback hosts (`localhost`, `127.0.0.1`, `::1`); non-loopback `http://`
@@ -996,7 +996,7 @@ export const SettingsSchema = lazySchema(() =>
         .array(CustomProviderEntrySchema)
         .optional()
         .describe(
-          'User-defined provider lanes (e.g. a zen-router lane or OpenRouter-direct models). ' +
+          'User-defined provider lanes (e.g. a gateway lane or OpenRouter-direct models). ' +
             'Matched by (baseUrl, model); labels are display-only and may duplicate saved-profile names. ' +
             'No apiKey field by design — secrets stay in env files / shell env.',
         ),
@@ -1008,7 +1008,7 @@ export const SettingsSchema = lazySchema(() =>
           'Default provider env file loaded at startup when no explicit --provider-env-file is given. ' +
             'Leading ~ expands to the home dir; relative paths resolve against the OpenClaude config dir. ' +
             'Same allowlist as --provider-env-file; only fills unset keys, so settings env wins on collision. ' +
-            'Example: "~/.openclaude/providers/zen-router.env".',
+            'Example: "~/.openclaude/providers/example-lane.env".',
         ),
       modelLimits: z
         .record(

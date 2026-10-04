@@ -5,27 +5,27 @@ hardcoded URLs, model ids, or account specifics in source.
 
 ## `customProviders`
 
-User-defined provider lanes. The same mechanism covers zen-router-style
+User-defined provider lanes. The same mechanism covers gateway-style
 lanes AND direct models (e.g. OpenRouter):
 
 ```jsonc
 {
   "customProviders": [
     {
-      "id": "zen-router", // required, [a-z0-9-], unique
-      "label": "OpenCode Zen Router", // required, shown in UI
-      "baseUrl": "http://127.0.0.1:18905/zen/v1", // required
-      "models": ["muse-spark-1.3-contributor-free"],
+      "id": "example-lane", // required, [a-z0-9-], unique
+      "label": "Example Gateway", // required, shown in UI
+      "baseUrl": "http://127.0.0.1:8080/v1", // required
+      "models": ["example-model"],
       // models omitted or ["*"] = all models discovered on baseUrl
       "supportsEffort": true, // default false
       "effortLevels": ["low", "medium", "high"], // default exactly this
-      "smallModel": "nemotron-3.5-lightning-free"
+      "smallModel": "example-small-model"
       // optional per-lane small/fast model for background chores.
       // Fallback chain: entry.smallModel → ANTHROPIC_SMALL_FAST_MODEL env
       // → OPENAI_MODEL. Omitted = divided setup off for that lane.
     }
   ],
-  "providerEnvFile": "~/.openclaude/providers/zen-router.env"
+  "providerEnvFile": "~/.openclaude/providers/example-lane.env"
 }
 ```
 
@@ -70,7 +70,7 @@ Default provider env file loaded at startup when no explicit
 configured lane with zero typing:
 
 ```jsonc
-{ "providerEnvFile": "~/.openclaude/providers/zen-router.env" }
+{ "providerEnvFile": "~/.openclaude/providers/example-lane.env" }
 ```
 
 - Leading `~` expands to the home dir; relative paths resolve against

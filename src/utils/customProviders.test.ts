@@ -40,13 +40,13 @@ beforeEach(() => {
   activeCustomProvidersOverride = null
 })
 
-const ZEN_ENTRY: CustomProviderEntry = {
-  id: 'zen-router',
-  label: 'OpenCode Zen Router',
-  baseUrl: 'http://127.0.0.1:18905/zen/v1',
-  models: ['muse-spark-1.3-contributor-free', 'nemotron-3.5-lightning-free'],
+const EXAMPLE_ENTRY: CustomProviderEntry = {
+  id: 'example-lane',
+  label: 'Example Gateway',
+  baseUrl: 'http://127.0.0.1:8080/v1',
+  models: ['example-model', 'example-small-model'],
   supportsEffort: true,
-  smallModel: 'nemotron-3.5-lightning-free',
+  smallModel: 'example-small-model',
 }
 
 const OR_ENTRY: CustomProviderEntry = {
@@ -58,68 +58,68 @@ const OR_ENTRY: CustomProviderEntry = {
 }
 
 describe('validateCustomProviderEntry', () => {
-  test('accepts the documented zen-router and openrouter entries', () => {
-    expect(validateCustomProviderEntry(ZEN_ENTRY, 0)).toEqual([])
+  test('accepts the documented example-lane and openrouter entries', () => {
+    expect(validateCustomProviderEntry(EXAMPLE_ENTRY, 0)).toEqual([])
     expect(validateCustomProviderEntry(OR_ENTRY, 1)).toEqual([])
   })
 
   test('rejects bad ids, naming the entry and field', () => {
     expect(
-      validateCustomProviderEntry({ ...ZEN_ENTRY, id: 'Bad_Id!' }, 0),
+      validateCustomProviderEntry({ ...EXAMPLE_ENTRY, id: 'Bad_Id!' }, 0),
     ).toEqual(['customProviders["Bad_Id!"].id: must match [a-z0-9-] and be unique'])
-    expect(validateCustomProviderEntry({ ...ZEN_ENTRY, id: '' }, 2)).toEqual([
+    expect(validateCustomProviderEntry({ ...EXAMPLE_ENTRY, id: '' }, 2)).toEqual([
       'customProviders[2].id: must match [a-z0-9-] and be unique',
     ])
   })
 
   test('rejects empty labels', () => {
-    expect(validateCustomProviderEntry({ ...ZEN_ENTRY, label: '  ' }, 0)).toEqual([
-      'customProviders["zen-router"].label: must be a non-empty string',
+    expect(validateCustomProviderEntry({ ...EXAMPLE_ENTRY, label: '  ' }, 0)).toEqual([
+      'customProviders["example-lane"].label: must be a non-empty string',
     ])
   })
 
   test('rejects unparseable base URLs', () => {
-    expect(validateCustomProviderEntry({ ...ZEN_ENTRY, baseUrl: '::not a url' }, 0)).toEqual([
-      'customProviders["zen-router"].baseUrl: must be a parseable URL',
+    expect(validateCustomProviderEntry({ ...EXAMPLE_ENTRY, baseUrl: '::not a url' }, 0)).toEqual([
+      'customProviders["example-lane"].baseUrl: must be a parseable URL',
     ])
   })
 
   test('permits http:// for loopback hosts only', () => {
-    for (const host of ['http://localhost:11434/v1', 'http://127.0.0.1:18905/zen/v1', 'http://[::1]:18905/zen/v1']) {
+    for (const host of ['http://localhost:11434/v1', 'http://127.0.0.1:8080/v1', 'http://[::1]:8080/v1']) {
       expect(
-        validateCustomProviderEntry({ ...ZEN_ENTRY, baseUrl: host }, 0),
+        validateCustomProviderEntry({ ...EXAMPLE_ENTRY, baseUrl: host }, 0),
       ).toEqual([])
     }
     expect(
-      validateCustomProviderEntry({ ...ZEN_ENTRY, baseUrl: 'http://192.168.1.10:11434/v1' }, 0),
+      validateCustomProviderEntry({ ...EXAMPLE_ENTRY, baseUrl: 'http://192.168.1.10:11434/v1' }, 0),
     ).toEqual([
-      'customProviders["zen-router"].baseUrl: plaintext http:// is only allowed for loopback hosts (localhost, 127.0.0.1, ::1)',
+      'customProviders["example-lane"].baseUrl: plaintext http:// is only allowed for loopback hosts (localhost, 127.0.0.1, ::1)',
     ])
     expect(
-      validateCustomProviderEntry({ ...ZEN_ENTRY, baseUrl: 'http://example.com/v1' }, 0),
+      validateCustomProviderEntry({ ...EXAMPLE_ENTRY, baseUrl: 'http://example.com/v1' }, 0),
     ).toEqual([
-      'customProviders["zen-router"].baseUrl: plaintext http:// is only allowed for loopback hosts (localhost, 127.0.0.1, ::1)',
+      'customProviders["example-lane"].baseUrl: plaintext http:// is only allowed for loopback hosts (localhost, 127.0.0.1, ::1)',
     ])
   })
 
   test('rejects apiKey fields by design', () => {
     expect(
-      validateCustomProviderEntry({ ...ZEN_ENTRY, apiKey: 'sk-secret' }, 0),
+      validateCustomProviderEntry({ ...EXAMPLE_ENTRY, apiKey: 'sk-secret' }, 0),
     ).toEqual([
-      'customProviders["zen-router"].apiKey: not supported — keep secrets in env files / shell env, never in settings.json',
+      'customProviders["example-lane"].apiKey: not supported — keep secrets in env files / shell env, never in settings.json',
     ])
   })
 
   test('rejects invalid effortLevels', () => {
     expect(
-      validateCustomProviderEntry({ ...ZEN_ENTRY, effortLevels: ['low', 'turbo'] }, 0),
+      validateCustomProviderEntry({ ...EXAMPLE_ENTRY, effortLevels: ['low', 'turbo'] }, 0),
     ).toEqual([
-      'customProviders["zen-router"].effortLevels: must be a non-empty array of low|medium|high|xhigh|max',
+      'customProviders["example-lane"].effortLevels: must be a non-empty array of low|medium|high|xhigh|max',
     ])
     expect(
-      validateCustomProviderEntry({ ...ZEN_ENTRY, effortLevels: [] }, 0),
+      validateCustomProviderEntry({ ...EXAMPLE_ENTRY, effortLevels: [] }, 0),
     ).toEqual([
-      'customProviders["zen-router"].effortLevels: must be a non-empty array of low|medium|high|xhigh|max',
+      'customProviders["example-lane"].effortLevels: must be a non-empty array of low|medium|high|xhigh|max',
     ])
   })
 
@@ -137,18 +137,18 @@ describe('validateCustomProviders', () => {
 
   test('rejects non-arrays and duplicate ids', () => {
     expect(validateCustomProviders({})).toEqual(['customProviders: must be an array'])
-    expect(validateCustomProviders([ZEN_ENTRY, { ...ZEN_ENTRY, label: 'Copy' }])).toEqual([
-      'customProviders["zen-router"].id: duplicate id',
+    expect(validateCustomProviders([EXAMPLE_ENTRY, { ...EXAMPLE_ENTRY, label: 'Copy' }])).toEqual([
+      'customProviders["example-lane"].id: duplicate id',
     ])
   })
 
   test('allows duplicate display labels (matching is by baseUrl+model)', () => {
     const other: CustomProviderEntry = {
-      id: 'zen-router-2',
-      label: 'OpenCode Zen Router',
-      baseUrl: 'http://127.0.0.1:18906/zen/v1',
+      id: 'example-lane-2',
+      label: 'Example Gateway',
+      baseUrl: 'http://127.0.0.1:8081/v1',
     }
-    expect(validateCustomProviders([ZEN_ENTRY, other])).toEqual([])
+    expect(validateCustomProviders([EXAMPLE_ENTRY, other])).toEqual([])
   })
 })
 
@@ -167,34 +167,34 @@ describe('isCustomProviderLoopbackHost', () => {
 describe('isAllowedCustomProviderBaseUrl', () => {
   test('allows https anywhere, http only on loopback', () => {
     expect(isAllowedCustomProviderBaseUrl('https://openrouter.ai/api/v1')).toBe(true)
-    expect(isAllowedCustomProviderBaseUrl('http://127.0.0.1:18905/zen/v1')).toBe(true)
+    expect(isAllowedCustomProviderBaseUrl('http://127.0.0.1:8080/v1')).toBe(true)
     expect(isAllowedCustomProviderBaseUrl('http://example.com/v1')).toBe(false)
     expect(isAllowedCustomProviderBaseUrl('::not a url')).toBe(false)
-    expect(isAllowedCustomProviderBaseUrl('ws://127.0.0.1:18905/zen/v1')).toBe(false)
+    expect(isAllowedCustomProviderBaseUrl('ws://127.0.0.1:8080/v1')).toBe(false)
   })
 })
 
 describe('findMatchingCustomProvider', () => {
-  const entries = [ZEN_ENTRY, OR_ENTRY]
+  const entries = [EXAMPLE_ENTRY, OR_ENTRY]
 
   test('matches on normalized base URL ignoring trailing slashes', () => {
     expect(
       findMatchingCustomProvider(
-        'http://127.0.0.1:18905/zen/v1///',
-        'muse-spark-1.3-contributor-free',
+        'http://127.0.0.1:8080/v1///',
+        'example-model',
         entries,
       ),
-    ).toEqual(ZEN_ENTRY)
+    ).toEqual(EXAMPLE_ENTRY)
   })
 
   test('matches models case-insensitively', () => {
     expect(
       findMatchingCustomProvider(
-        'http://127.0.0.1:18905/zen/v1',
-        'MUSE-SPARK-1.3-CONTRIBUTOR-FREE',
+        'http://127.0.0.1:8080/v1',
+        'EXAMPLE-MODEL',
         entries,
       )?.id,
-    ).toBe('zen-router')
+    ).toBe('example-lane')
   })
 
   test('models omitted or ["*"] matches every model', () => {
@@ -215,13 +215,13 @@ describe('findMatchingCustomProvider', () => {
 
   test('model mismatch does not match', () => {
     expect(
-      findMatchingCustomProvider('http://127.0.0.1:18905/zen/v1', 'gpt-4o', entries),
+      findMatchingCustomProvider('http://127.0.0.1:8080/v1', 'gpt-4o', entries),
     ).toBeUndefined()
   })
 
   test('base URL mismatch does not match', () => {
     expect(
-      findMatchingCustomProvider('http://127.0.0.1:9999/v1', 'muse-spark-1.3-contributor-free', entries),
+      findMatchingCustomProvider('http://127.0.0.1:9999/v1', 'example-model', entries),
     ).toBeUndefined()
   })
 
@@ -238,21 +238,21 @@ describe('findMatchingCustomProvider', () => {
 })
 
 describe('getCustomProviderLabel / getCustomProviderSmallModel', () => {
-  const entries = [ZEN_ENTRY, OR_ENTRY]
+  const entries = [EXAMPLE_ENTRY, OR_ENTRY]
 
   test('label resolves through the same lookup', () => {
     expect(
-      getCustomProviderLabel('http://127.0.0.1:18905/zen/v1', 'muse-spark-1.3-contributor-free', entries),
-    ).toBe('OpenCode Zen Router')
+      getCustomProviderLabel('http://127.0.0.1:8080/v1', 'example-model', entries),
+    ).toBe('Example Gateway')
     expect(
-      getCustomProviderLabel('http://127.0.0.1:18905/zen/v1', 'gpt-4o', entries),
+      getCustomProviderLabel('http://127.0.0.1:8080/v1', 'gpt-4o', entries),
     ).toBeUndefined()
   })
 
   test('smallModel falls through to undefined when the entry sets none', () => {
     expect(
-      getCustomProviderSmallModel('http://127.0.0.1:18905/zen/v1', 'muse-spark-1.3-contributor-free', entries),
-    ).toBe('nemotron-3.5-lightning-free')
+      getCustomProviderSmallModel('http://127.0.0.1:8080/v1', 'example-model', entries),
+    ).toBe('example-small-model')
     expect(
       getCustomProviderSmallModel('https://openrouter.ai/api/v1', 'thinkingmachines/inkling:free', entries),
     ).toBeUndefined()
@@ -261,19 +261,19 @@ describe('getCustomProviderLabel / getCustomProviderSmallModel', () => {
 
 describe('settings-backed lookup', () => {
   test('reads entries from loaded settings', async () => {
-    activeCustomProvidersOverride = [ZEN_ENTRY]
+    activeCustomProvidersOverride = [EXAMPLE_ENTRY]
     const fresh = await import(`./customProviders.js?settings-backed=${Date.now()}`)
     expect(
-      fresh.getCustomProviderLabel('http://127.0.0.1:18905/zen/v1', 'muse-spark-1.3-contributor-free'),
-    ).toBe('OpenCode Zen Router')
+      fresh.getCustomProviderLabel('http://127.0.0.1:8080/v1', 'example-model'),
+    ).toBe('Example Gateway')
     activeCustomProvidersOverride = null
   })
 })
 
 describe('in-session lane switch helpers (§3.4)', () => {
   test('default model is the first listed model for specific lists', () => {
-    expect(getCustomLaneDefaultModel(ZEN_ENTRY, 'gpt-4o')).toBe(
-      'muse-spark-1.3-contributor-free',
+    expect(getCustomLaneDefaultModel(EXAMPLE_ENTRY, 'gpt-4o')).toBe(
+      'example-model',
     )
   })
 
@@ -295,10 +295,10 @@ describe('in-session lane switch helpers (§3.4)', () => {
   })
 
   test('profile env carries endpoint + model, no key material', () => {
-    expect(buildCustomLaneProfileEnv(ZEN_ENTRY, 'gpt-4o')).toEqual({
+    expect(buildCustomLaneProfileEnv(EXAMPLE_ENTRY, 'gpt-4o')).toEqual({
       CLAUDE_CODE_USE_OPENAI: '1',
-      OPENAI_BASE_URL: 'http://127.0.0.1:18905/zen/v1',
-      OPENAI_MODEL: 'muse-spark-1.3-contributor-free',
+      OPENAI_BASE_URL: 'http://127.0.0.1:8080/v1',
+      OPENAI_MODEL: 'example-model',
     })
   })
 
@@ -317,14 +317,14 @@ describe('in-session lane switch helpers (§3.4)', () => {
   test('lane-active check matches by (baseUrl, model)', () => {
     expect(
       isCustomLaneActive(
-        ZEN_ENTRY,
-        'http://127.0.0.1:18905/zen/v1',
-        'muse-spark-1.3-contributor-free',
+        EXAMPLE_ENTRY,
+        'http://127.0.0.1:8080/v1',
+        'example-model',
       ),
     ).toBe(true)
     expect(
-      isCustomLaneActive(ZEN_ENTRY, 'http://127.0.0.1:18905/zen/v1', 'gpt-4o'),
+      isCustomLaneActive(EXAMPLE_ENTRY, 'http://127.0.0.1:8080/v1', 'gpt-4o'),
     ).toBe(false)
-    expect(isCustomLaneActive(ZEN_ENTRY, undefined, undefined)).toBe(false)
+    expect(isCustomLaneActive(EXAMPLE_ENTRY, undefined, undefined)).toBe(false)
   })
 })

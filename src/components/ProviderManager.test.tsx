@@ -6309,10 +6309,10 @@ test('ProviderManager deleting the GitHub provider reverts the hydrated credenti
 
 const CUSTOM_LANE_TEST_ENTRIES = [
   {
-    id: 'zen-router',
-    label: 'OpenCode Zen Router',
-    baseUrl: 'http://127.0.0.1:18905/zen/v1',
-    models: ['spark-model', 'flash-model'],
+    id: 'example-lane',
+    label: 'Example Gateway',
+    baseUrl: 'http://127.0.0.1:8080/v1',
+    models: ['example-model', 'flash-model'],
     supportsEffort: true,
   },
 ]
@@ -6386,14 +6386,14 @@ test('ProviderManager lists customProviders lanes in Set active provider', async
       mounted.getOutput,
       frame =>
         frame.includes('Set active provider') &&
-        frame.includes('OpenCode Zen Router'),
+        frame.includes('Example Gateway'),
     )
     await Bun.sleep(25)
     const output = stripAnsi(extractLastFrame(mounted.getOutput()))
 
-    expect(output).toContain('OpenCode Zen Router')
+    expect(output).toContain('Example Gateway')
     expect(output).toContain(
-      'custom · http://127.0.0.1:18905/zen/v1 · spark-model, flash-model',
+      'custom · http://127.0.0.1:8080/v1 · example-model, flash-model',
     )
   } finally {
     await mounted.dispose()
@@ -6450,7 +6450,7 @@ test('ProviderManager activating a custom lane switches the session without pers
       mounted.getOutput,
       frame =>
         frame.includes('Set active provider') &&
-        frame.includes('OpenCode Zen Router'),
+        frame.includes('Example Gateway'),
     )
     await Bun.sleep(25)
     // The lane is the only entry (no saved profiles, no GitHub, Anthropic
@@ -6466,8 +6466,8 @@ test('ProviderManager activating a custom lane switches the session without pers
         profile: 'openai',
         env: {
           CLAUDE_CODE_USE_OPENAI: '1',
-          OPENAI_BASE_URL: 'http://127.0.0.1:18905/zen/v1',
-          OPENAI_MODEL: 'spark-model',
+          OPENAI_BASE_URL: 'http://127.0.0.1:8080/v1',
+          OPENAI_MODEL: 'example-model',
         },
         createdAt: '2026-04-10T00:00:00.000Z',
       },
@@ -6477,19 +6477,19 @@ test('ProviderManager activating a custom lane switches the session without pers
     // Endpoint + model switch in-session. (String() because the deletes
     // above narrow process.env.* to undefined for tsc.)
     expect(String(process.env.OPENAI_BASE_URL)).toBe(
-      'http://127.0.0.1:18905/zen/v1',
+      'http://127.0.0.1:8080/v1',
     )
-    expect(String(process.env.OPENAI_MODEL)).toBe('spark-model')
+    expect(String(process.env.OPENAI_MODEL)).toBe('example-model')
     expect(
       appStateChanges.some(
-        ({ newState }) => newState.mainLoopModel === 'spark-model',
+        ({ newState }) => newState.mainLoopModel === 'example-model',
       ),
     ).toBe(true)
     expect(onDone).toHaveBeenCalledWith(
       expect.objectContaining({
         action: 'activated',
-        activeProviderName: 'OpenCode Zen Router',
-        activeProviderModel: 'spark-model',
+        activeProviderName: 'Example Gateway',
+        activeProviderModel: 'example-model',
       }),
     )
   } finally {
@@ -6542,14 +6542,14 @@ test('ProviderManager custom lane activation failure restores the previous env',
       mounted.getOutput,
       frame =>
         frame.includes('Set active provider') &&
-        frame.includes('OpenCode Zen Router'),
+        frame.includes('Example Gateway'),
     )
     await Bun.sleep(25)
     mounted.stdin.write('\r')
 
     await waitForFrameOutput(
       mounted.getOutput,
-      frame => frame.includes('Could not activate OpenCode Zen Router'),
+      frame => frame.includes('Could not activate Example Gateway'),
     )
 
     // A failed switch changes nothing.
