@@ -10,7 +10,7 @@ import { registerCleanup } from './cleanupRegistry.js'
 import { logForDebugging } from './debug.js'
 import { getClaudeConfigHomeDir } from './envUtils.js'
 import { errorMessage, isFsInaccessible } from './errors.js'
-import { isProcessRunning } from './genericProcessUtils.js'
+import { isProcessRunning, getProcessStartTimes } from './genericProcessUtils.js'
 import { getPlatform } from './platform.js'
 import { jsonParse, jsonStringify } from './slowOperations.js'
 import { getAgentId } from './teammate.js'
@@ -78,6 +78,11 @@ export async function registerSession(): Promise<boolean> {
       pidFile,
       jsonStringify({
         pid: process.pid,
+        // Process birth time (epoch ms). Lets countConcurrentSessions tell
+        // pid reuse apart from a live session: a stale file naming a recycled
+        // pid records a different incarnation's birth. Missing on old files,
+        // which keep the previous trust-the-probe behavior (fail open).
+        processStart: Date.now() - process.uptime() * 1000,
         sessionId: getSessionId(),
         cwd: getOriginalCwd(),
         startedAt: Date.now(),
@@ -161,6 +166,46 @@ export async function updateSessionActivity(patch: {
 }
 
 /**
+ * Tolerance for comparing a pid file's recorded process birth against the
+ * live process table. Loose on purpose: start-time sources differ by seconds
+ * at most, while pid reuse spans minutes or more — and a wrong-side error
+ * here undercounts sessions (the unsafe direction for this telemetry), so
+ * bias toward matching.
+ */
+export const PROCESS_START_MATCH_TOLERANCE_MS = 60_000
+
+/**
+ * Whether a pid file's recorded process birth matches the live process.
+ * `actualStart` undefined (pid absent from the table) matches: without
+ * evidence of reuse, trust the file — fail open, never undercount.
+ */
+export function isMatchingProcessStart(
+  recordedStart: number,
+  actualStart: number | undefined,
+): boolean {
+  if (actualStart === undefined) {
+    return true
+  }
+  return (
+    Math.abs(actualStart - recordedStart) <= PROCESS_START_MATCH_TOLERANCE_MS
+  )
+}
+
+/** Best-effort read of a pid file's recorded process birth. */
+async function readRecordedProcessStart(
+  path: string,
+): Promise<number | undefined> {
+  try {
+    const data = jsonParse(await readFile(path, 'utf8')) as {
+      processStart?: unknown
+    }
+    return typeof data.processStart === 'number' ? data.processStart : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * Count live concurrent CLI sessions (including this one).
  * Filters out stale PID files (crashed sessions) and deletes them.
  * Returns 0 on any error (conservative).
@@ -178,6 +223,9 @@ export async function countConcurrentSessions(): Promise<number> {
   }
 
   let count = 0
+  // Process-start table, fetched lazily and shared by all pid files in this
+  // pass: only queried when at least one file records a processStart.
+  let startTimes: Map<number, number> | undefined
   for (const file of files) {
     // Strict filename guard: only `<pid>.json` is a candidate. parseInt's
     // lenient prefix-parsing means `2026-03-14_notes.md` would otherwise
@@ -190,8 +238,26 @@ export async function countConcurrentSessions(): Promise<number> {
       continue
     }
     if (isProcessRunning(pid)) {
-      count++
-    } else if (getPlatform() !== 'wsl') {
+      // Alive pid — but it may be an unrelated process reusing a stale
+      // file's pid. When the file records the session's process birth,
+      // compare it against the live table: a mismatch means the file is
+      // stale, so sweep it instead of counting it. Anything unknown (old
+      // file without the field, unqueryable table) counts the session —
+      // this is telemetry, so overcount beats undercount.
+      const recordedStart = await readRecordedProcessStart(join(dir, file))
+      if (recordedStart === undefined) {
+        count++
+        continue
+      }
+      if (!startTimes) {
+        startTimes = await getProcessStartTimes()
+      }
+      if (isMatchingProcessStart(recordedStart, startTimes.get(pid))) {
+        count++
+        continue
+      }
+    }
+    if (getPlatform() !== 'wsl') {
       // Stale file from a crashed session — sweep it. Skip on WSL: if
       // ~/.claude/sessions/ is shared with Windows-native Claude (symlink
       // or CLAUDE_CONFIG_DIR), a Windows PID won't be probeable from WSL

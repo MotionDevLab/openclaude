@@ -156,6 +156,71 @@ export async function getAncestorCommandsAsync(
 }
 
 /**
+ * Gets the start time of every currently visible process in a single query.
+ * Used to detect pid reuse: a pid file naming a live pid is only trustworthy
+ * when the live process started at (roughly) the recorded time.
+ * @returns Map from pid to process start time in epoch milliseconds.
+ *   Never throws: any failure yields an empty (or partial) map, and callers
+ *   treat missing entries as "unknown" (fail open, never undercount).
+ */
+export async function getProcessStartTimes(): Promise<Map<number, number>> {
+  const table = new Map<number, number>()
+  try {
+    if (process.platform === 'win32') {
+      // Epoch ms straight from CIM: no date-string parsing (PowerShell
+      // stringifies [DateTime] in the current culture, which is unparseable).
+      // Some system processes report no CreationDate — skip those rows.
+      const script = `Get-CimInstance Win32_Process | ForEach-Object { if ($_.CreationDate) { "$($_.ProcessId)|$([long]($_.CreationDate.ToUniversalTime() - [datetime]'1970-01-01').TotalMilliseconds)" } }`
+      const result = await execFileNoThrowWithCwd(
+        'powershell.exe',
+        ['-NoProfile', '-Command', script],
+        { timeout: 10_000 },
+      )
+      if (result.code !== 0 || !result.stdout?.trim()) {
+        return table
+      }
+      for (const line of result.stdout.trim().split('\n')) {
+        const sep = line.indexOf('|')
+        if (sep < 0) {
+          continue
+        }
+        const pid = parseInt(line.slice(0, sep).trim(), 10)
+        const started = parseInt(line.slice(sep + 1).trim(), 10)
+        if (!isNaN(pid) && !isNaN(started)) {
+          table.set(pid, started)
+        }
+      }
+      return table
+    }
+
+    // etimes (elapsed seconds) is locale-free, unlike lstart's month names.
+    const result = await execFileNoThrowWithCwd(
+      'sh',
+      ['-c', 'ps -e -o pid=,etimes='],
+      { timeout: 5000 },
+    )
+    if (result.code !== 0 || !result.stdout?.trim()) {
+      return table
+    }
+    const now = Date.now()
+    for (const line of result.stdout.trim().split('\n')) {
+      const tokens = line.trim().split(/\s+/)
+      if (tokens.length < 2) {
+        continue
+      }
+      const pid = parseInt(tokens[0], 10)
+      const elapsedSec = parseInt(tokens[1], 10)
+      if (!isNaN(pid) && !isNaN(elapsedSec)) {
+        table.set(pid, now - elapsedSec * 1000)
+      }
+    }
+    return table
+  } catch {
+    return table
+  }
+}
+
+/**
  * Gets the child process IDs for a given process
  * @param pid - The parent process ID
  * @returns Array of child process IDs as numbers
