@@ -328,6 +328,22 @@ describe('getCustomProviderLimits', () => {
     expect(getCustomProviderLimits(undefined, 'any-model', entries)).toEqual({})
   })
 
+  test('strips ?runtime suffixes for scoped entries', () => {
+    const scoped: CustomProviderEntry = {
+      id: 'scoped-lane',
+      label: 'Scoped',
+      baseUrl: 'https://scoped.example/v1',
+      models: ['scoped-model'],
+      contextWindow: 64_000,
+    }
+    expect(
+      getCustomProviderLimits('https://scoped.example/v1', 'scoped-model?reasoning=high', [scoped]),
+    ).toEqual({ contextWindow: 64_000 })
+    expect(
+      getCustomProviderLimits('https://scoped.example/v1', 'other-model?reasoning=high', [scoped]),
+    ).toEqual({})
+  })
+
   test('drops malformed values instead of throwing', () => {
     const malformed = {
       ...limited,

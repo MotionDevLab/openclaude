@@ -393,6 +393,15 @@ export type CustomProviderLaneLimits = {
   maxOutputTokens?: number
 }
 
+function stripRuntimeModelSuffix(model: string | undefined): string | undefined {
+  if (model === undefined) {
+    return undefined
+  }
+  const queryIndex = model.indexOf('?')
+  const stripped = (queryIndex === -1 ? model : model.slice(0, queryIndex)).trim()
+  return stripped.length > 0 ? stripped : undefined
+}
+
 function toPositiveInt(value: unknown): number | undefined {
   return typeof value === 'number' &&
     Number.isInteger(value) &&
@@ -408,14 +417,20 @@ function toPositiveInt(value: unknown): number | undefined {
  * independently optional; malformed values are dropped, never thrown).
  * Returns an empty object when no entry matches or the entry declares no
  * limits, so callers fall through to the existing resolution chain
- * untouched. Pass `entries` explicitly in tests to avoid settings I/O.
+ * untouched. Matching tries the raw model id first, then the id with any
+ * `?...` runtime suffix stripped (e.g. `?reasoning=high` variants are the
+ * same model for scoping purposes), mirroring getBaseModelApiName in
+ * integrations/runtimeMetadata.ts. Pass `entries` explicitly in tests to
+ * avoid settings I/O.
  */
 export function getCustomProviderLimits(
   baseUrl: string | undefined,
   model?: string | undefined,
   entries?: CustomProviderEntry[],
 ): CustomProviderLaneLimits {
-  const match = findMatchingCustomProvider(baseUrl, model, entries)
+  const match =
+    findMatchingCustomProvider(baseUrl, model, entries) ??
+    findMatchingCustomProvider(baseUrl, stripRuntimeModelSuffix(model), entries)
   if (!match) {
     return {}
   }

@@ -168,3 +168,86 @@ test('resolveModelRuntimeLimits respects the lane models scoping', async () => {
   })
   expect(unscoped.contextWindow).toBeUndefined()
 })
+
+test('resolveModelRuntimeLimits lets the lane default beat the discovery cache', async () => {
+  const { clearDiscoveryCache, setCachedModels } = await import(
+    `./discoveryCache.js?ts=${Date.now()}`
+  )
+  const { getDiscoveryCacheKey } = await import(
+    `./discoveryService.js?ts=${Date.now()}`
+  )
+  // The discovery cache path comes from getClaudeConfigHomeDir(), which
+  // ignores CLAUDE_CONFIG_DIR by design. Without this override the fixture
+  // below would be written into the caller's real ~/.openclaude.
+  const {
+    getClaudeConfigHomeDirOverrideForTesting,
+    setClaudeConfigHomeDirForTesting,
+  } = await import('../utils/envUtils.js')
+  const { mkdtempSync, rmSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+
+  const previousOverride = getClaudeConfigHomeDirOverrideForTesting()
+  const tempDir = mkdtempSync(join(tmpdir(), 'openclaude-lane-limits-'))
+  setClaudeConfigHomeDirForTesting(tempDir)
+  try {
+    await setCachedModels(getDiscoveryCacheKey('custom', { baseUrl: LANE_BASE_URL }), {
+      models: [
+        {
+          id: 'lane-cache-combo',
+          apiName: 'lane-cache-combo',
+          label: 'lane-cache-combo',
+          contextWindow: 128_000,
+          maxOutputTokens: 8_192,
+        },
+      ],
+    })
+
+    const { resolveModelRuntimeLimits } = await importFresh()
+    // No explicit baseUrl option: the lane match fires through the
+    // OPENAI_BASE_URL env fallback, the same path context budgeting uses.
+    const resolveWithDiscovery = () =>
+      resolveModelRuntimeLimits({
+        model: 'lane-cache-combo',
+        processEnv: {
+          CLAUDE_CODE_USE_OPENAI: '1',
+          OPENAI_BASE_URL: LANE_BASE_URL,
+        },
+      })
+
+    // Establish that the isolated cache is observable first, so the lane
+    // assertion below proves precedence rather than passing on a missing
+    // fixture.
+    mockSettings = {}
+    const discovered = resolveWithDiscovery()
+    expect(discovered.contextWindow).toBe(128_000)
+    expect(discovered.maxOutputTokens).toBe(8_192)
+
+    mockSettings = { customProviders: [laneEntry({ contextWindow: 1_000_000, maxOutputTokens: 32_768 })] }
+    const overridden = resolveWithDiscovery()
+
+    expect(overridden.contextWindow).toBe(1_000_000)
+    expect(overridden.maxOutputTokens).toBe(32_768)
+  } finally {
+    // Clears the module-level sync snapshot as well, so the fixture cannot
+    // leak into a later suite once the temp dir is removed.
+    await clearDiscoveryCache()
+    setClaudeConfigHomeDirForTesting(previousOverride)
+    rmSync(tempDir, { recursive: true, force: true })
+  }
+})
+
+test('resolveModelRuntimeLimits matches ?runtime suffix variants to a scoped lane', async () => {
+  mockSettings = {
+    customProviders: [laneEntry({ models: ['scoped-model'] })],
+  }
+  const { resolveModelRuntimeLimits } = await importFresh()
+
+  const limits = resolveModelRuntimeLimits({
+    model: 'scoped-model?reasoning=high',
+    baseUrl: LANE_BASE_URL,
+    processEnv: {},
+  })
+
+  expect(limits.contextWindow).toBe(128_000)
+})
