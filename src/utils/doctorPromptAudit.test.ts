@@ -102,6 +102,46 @@ describe('findStaleFilePaths', () => {
       resolved: '/proj/rules/gone.md',
     })
   })
+
+  test('skips repo-shaped @-refs like @owner/repo prose', () => {
+    const files = [
+      file(
+        '/proj/rules/a.md',
+        'See @owner/repo for upstream.\nRead @owner/repo/sub/path here.\nModel @openai/gpt-4 is used.',
+      ),
+    ]
+
+    expect(findStaleFilePaths(files, memFs([]))).toEqual([])
+  })
+
+  test('keeps true-positive @-refs that are not repo-shaped', () => {
+    const cases = [
+      '@./missing.md',
+      '@/abs/x',
+      '@~/x',
+      '@a/b.md',
+      '@Makefile',
+      '@user',
+    ]
+    for (const ref of cases) {
+      const files = [file('/proj/rules/a.md', `See ${ref} here.`)]
+      const findings = findStaleFilePaths(files, memFs([]))
+      expect(findings.map(finding => finding.ref)).toContain(ref)
+    }
+  })
+
+  test('flags only the true positive when repo prose shares a doc with a missing ref', () => {
+    const files = [
+      file(
+        '/proj/rules/a.md',
+        'See @owner/repo for upstream.\nSee @./missing.md for details.',
+      ),
+    ]
+
+    const findings = findStaleFilePaths(files, memFs([]))
+
+    expect(findings.map(finding => finding.ref)).toEqual(['@./missing.md'])
+  })
 })
 
 describe('findStaleCommandRefs', () => {
