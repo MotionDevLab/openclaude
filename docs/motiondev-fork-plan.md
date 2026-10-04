@@ -11,8 +11,8 @@
 
 Four minimal, orthogonal, mechanism-not-hardcode patches (Approach 1):
 
-1. **User-defined provider presets** — a zen-router-style lane gets a real
-   name ("OpenCode Zen Router") in `/provider`, `/model`, and the startup
+1. **User-defined provider presets** — a gateway-style lane gets a real
+   name ("Example Gateway") in `/provider`, `/model`, and the startup
    banner instead of generic "Local OpenAI-compatible".
 2. **First-class effort support for OpenAI-compat lanes** — the effort
    switcher offers low/medium/high on declared lanes instead of
@@ -25,7 +25,7 @@ Four minimal, orthogonal, mechanism-not-hardcode patches (Approach 1):
 
 ## 2. Non-goals
 
-- No hardcoded zen-router URLs, model ids, or account specifics in source.
+- No hardcoded gateway URLs, model ids, or account specifics in source.
   Everything is user-configured via `settings.json`.
 - No change to Anthropic/first-party, Bedrock/Vertex/Foundry, Gemini, or
   Codex paths.
@@ -42,14 +42,14 @@ New optional top-level `settings.json` key:
 ```jsonc
 "customProviders": [
   {
-    "id": "zen-router",                       // required, [a-z0-9-], unique
-    "label": "OpenCode Zen Router",           // required, shown in UI
-    "baseUrl": "http://127.0.0.1:18905/zen/v1", // required
-    "models": ["muse-spark-1.3-contributor-free", "nemotron-3.5-lightning-free"],
+    "id": "example-lane",                       // required, [a-z0-9-], unique
+    "label": "Example Gateway",           // required, shown in UI
+    "baseUrl": "http://127.0.0.1:8080/v1", // required
+    "models": ["example-model", "example-small-model"],
     // models omitted or ["*"] = all models discovered on baseUrl
     "supportsEffort": true,                   // default false
     "effortLevels": ["low", "medium", "high"], // default exactly this
-    "smallModel": "nemotron-3.5-lightning-free"
+    "smallModel": "example-small-model"
     // optional per-lane small/fast model for background chores
     // (token estimation, hook models, search planning, summaries).
     // Fallback chain: entry.smallModel → ANTHROPIC_SMALL_FAST_MODEL env
@@ -66,9 +66,9 @@ New optional top-level `settings.json` key:
 ]
 ```
 
-The same mechanism covers zen-router lanes AND OpenRouter-direct models:
+The same mechanism covers gateway lanes AND OpenRouter-direct models:
 §3.2 keys off the matched `(baseUrl, model)` entry, so Inkling via OR
-gets the effort picker the same way spark via zen does. (Alternative
+gets the effort picker the same way a lane model via a gateway does. (Alternative
 with zero code, already working today: `ANTHROPIC_DEFAULT_*_MODEL` tier
 env vars per model — §3.2 does not remove that path.)
 
@@ -160,7 +160,7 @@ support. If a lane's upstream 400s the parameter, the fix is
 New optional `settings.json` key:
 
 ```jsonc
-"providerEnvFile": "~/.openclaude/providers/zen-router.env"
+"providerEnvFile": "~/.openclaude/providers/example-lane.env"
 ```
 
 Behavior (grounded in `src/entrypoints/cli.tsx` load order ~lines 402–462
@@ -223,7 +223,7 @@ when unset."):
   dedicated model is opt-in via the `compactModel` global-config key
   (`/config` → ModelPicker).
 - Trade-off when set to a different model: prompt-cache sharing with the
-  main conversation is disabled. On 3P lanes (zen, OR) there is no shared
+  main conversation is disabled. On 3P lanes (gateway, OR) there is no shared
   cache anyway, so a cheaper/faster lane as `compactModel` costs
   ~nothing — but v1 keeps the default (same model = best summary
   fidelity). Revisit after the four code commits land.
@@ -253,13 +253,12 @@ when unset."):
 - `bun run build` + `bun run smoke` clean.
 - Repo pre-push contract per `CONTRIBUTING.md` before any push.
 - Live matrix on this machine (Windows PowerShell):
-  1. Fresh launch (no flag) → banner shows "OpenCode Zen Router".
-  2. `/model` on spark → effort levels offered (no "not supported").
-  3. Prompt at low vs high → HTTP 200s in router dashboard logs
-     (`http://localhost:18904` → Logs), no 400 spike.
+  1. Fresh launch (no flag) → banner shows "Example Gateway".
+  2. `/model` on the lane model → effort levels offered (no "not supported").
+  3. Prompt at low vs high → HTTP 200s in the gateway dashboard logs, no 400 spike.
    4. Explicit `--provider-env-file <other>` still overrides the default;
       plain launch with the setting removed behaves exactly as stock.
-   5. `/provider` → "Set active provider" lists "OpenCode Zen Router";
+   5. `/provider` → "Set active provider" lists "Example Gateway";
       selecting it switches endpoint+model in-session (banner updates,
       prompt answers); switching back to OpenRouter works the same way.
    6. `npm install -g github:MotionDevLab/openclaude#feat/custom-providers`

@@ -1,16 +1,16 @@
 import { expect, test } from 'bun:test'
 import { SettingsSchema } from './types.js'
 
-test('customProviders accepts the documented zen-router entry', () => {
+test('customProviders accepts the documented example-lane entry', () => {
   const result = SettingsSchema().safeParse({
     customProviders: [
       {
-        id: 'zen-router',
-        label: 'OpenCode Zen Router',
-        baseUrl: 'http://127.0.0.1:18905/zen/v1',
-        models: ['muse-spark-1.3-contributor-free'],
+        id: 'example-lane',
+        label: 'Example Gateway',
+        baseUrl: 'http://127.0.0.1:8080/v1',
+        models: ['example-model'],
         supportsEffort: true,
-        smallModel: 'nemotron-3.5-lightning-free',
+        smallModel: 'example-small-model',
       },
     ],
   })
@@ -69,7 +69,7 @@ test('settings without customProviders still parse (key is optional)', () => {
 test('providerEnvFile accepts a settings-default path', () => {
   expect(
     SettingsSchema().safeParse({
-      providerEnvFile: '~/.openclaude/providers/zen-router.env',
+      providerEnvFile: '~/.openclaude/providers/example-lane.env',
     }).success,
   ).toBe(true)
 })

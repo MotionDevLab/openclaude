@@ -664,7 +664,7 @@ describe('settings-default env file collision', () => {
   it('fills gaps only: settings env wins on collision', () => {
     const filePath = writeTempEnvFile([
       'CLAUDE_CODE_USE_OPENAI=1',
-      'OPENAI_BASE_URL=http://127.0.0.1:18905/zen/v1',
+      'OPENAI_BASE_URL=http://127.0.0.1:8080/v1',
       'OPENAI_MODEL=file-model',
     ].join('\n'))
 
@@ -673,7 +673,7 @@ describe('settings-default env file collision', () => {
     const loaded = loadEnvFile(filePath)
 
     expect(process.env.CLAUDE_CODE_USE_OPENAI).toBe('1')
-    expect(process.env.OPENAI_BASE_URL).toBe('http://127.0.0.1:18905/zen/v1')
+    expect(process.env.OPENAI_BASE_URL).toBe('http://127.0.0.1:8080/v1')
     // Collision: the settings value is kept, the file fills gaps only.
     expect(process.env.OPENAI_MODEL).toBe('settings-model')
     expect(loaded.OPENAI_MODEL).toBeUndefined()

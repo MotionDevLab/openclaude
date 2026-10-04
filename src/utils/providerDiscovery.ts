@@ -161,7 +161,7 @@ export function getOpenAICompatibleModelsBaseUrl(baseUrl?: string): string {
 
 export function getLocalOpenAICompatibleProviderLabel(baseUrl?: string, model?: string): string {
   // User-defined `customProviders` lanes win: match by (baseUrl, model) so a
-  // zen-router-style lane gets its real name instead of generic
+  // gateway-style lane gets its real name instead of generic
   // "Local OpenAI-compatible". Everything below is untouched.
   const customLabel = getCustomProviderLabel(baseUrl, model)
   if (customLabel) {

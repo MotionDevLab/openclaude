@@ -464,10 +464,10 @@ describe('configured third-party effort precedence', () => {
 })
 
 describe('customProviders declared-lane effort (§3.2)', () => {
-  const ZEN_BASE_URL = 'http://127.0.0.1:18905/zen/v1'
-  const SPARK_MODEL = 'muse-spark-1.3-contributor-free'
+  const EXAMPLE_BASE_URL = 'http://127.0.0.1:8080/v1'
+  const EXAMPLE_MODEL = 'example-model'
 
-  function zenContext(baseUrl: string | undefined = ZEN_BASE_URL) {
+  function laneContext(baseUrl: string | undefined = EXAMPLE_BASE_URL) {
     return {
       apiProvider: 'openai' as const,
       routeId: 'custom',
@@ -476,13 +476,13 @@ describe('customProviders declared-lane effort (§3.2)', () => {
     }
   }
 
-  function declareZenLane(entry?: Record<string, unknown>) {
+  function declareExampleLane(entry?: Record<string, unknown>) {
     activeCustomProvidersOverride = [
       {
-        id: 'zen-router',
-        label: 'OpenCode Zen Router',
-        baseUrl: ZEN_BASE_URL,
-        models: [SPARK_MODEL, 'nemotron-3.5-lightning-free'],
+        id: 'example-lane',
+        label: 'Example Gateway',
+        baseUrl: EXAMPLE_BASE_URL,
+        models: [EXAMPLE_MODEL, 'example-small-model'],
         supportsEffort: true,
         ...(entry ?? {}),
       },
@@ -490,11 +490,11 @@ describe('customProviders declared-lane effort (§3.2)', () => {
   }
 
   test('matched entry resolves controllable reasoning_effort with default levels', async () => {
-    declareZenLane()
+    declareExampleLane()
     const { modelSupportsEffort, resolveModelReasoningControl, getAvailableEffortLevels } =
       await importFreshEffortModule()
 
-    expect(resolveModelReasoningControl(SPARK_MODEL, zenContext())).toMatchObject({
+    expect(resolveModelReasoningControl(EXAMPLE_MODEL, laneContext())).toMatchObject({
       supportsReasoning: true,
       controllable: true,
       mode: 'levels',
@@ -502,8 +502,8 @@ describe('customProviders declared-lane effort (§3.2)', () => {
       wireFormat: 'reasoning_effort',
       source: 'capability',
     })
-    expect(modelSupportsEffort(SPARK_MODEL, zenContext())).toBe(true)
-    expect(getAvailableEffortLevels(SPARK_MODEL, zenContext())).toEqual([
+    expect(modelSupportsEffort(EXAMPLE_MODEL, laneContext())).toBe(true)
+    expect(getAvailableEffortLevels(EXAMPLE_MODEL, laneContext())).toEqual([
       'low',
       'medium',
       'high',
@@ -511,17 +511,17 @@ describe('customProviders declared-lane effort (§3.2)', () => {
   })
 
   test('entry effortLevels are honored (lanes opt into more)', async () => {
-    declareZenLane({ effortLevels: ['low', 'medium', 'high', 'xhigh'] })
+    declareExampleLane({ effortLevels: ['low', 'medium', 'high', 'xhigh'] })
     const { resolveModelReasoningControl, getAvailableEffortLevels } =
       await importFreshEffortModule()
 
-    expect(resolveModelReasoningControl(SPARK_MODEL, zenContext())).toMatchObject({
+    expect(resolveModelReasoningControl(EXAMPLE_MODEL, laneContext())).toMatchObject({
       controllable: true,
       levels: ['low', 'medium', 'high', 'xhigh'],
       wireFormat: 'reasoning_effort',
       source: 'capability',
     })
-    expect(getAvailableEffortLevels(SPARK_MODEL, zenContext())).toEqual([
+    expect(getAvailableEffortLevels(EXAMPLE_MODEL, laneContext())).toEqual([
       'low',
       'medium',
       'high',
@@ -530,46 +530,46 @@ describe('customProviders declared-lane effort (§3.2)', () => {
   })
 
   test('model mismatch on the same base URL stays non-controllable', async () => {
-    declareZenLane()
+    declareExampleLane()
     const { modelSupportsEffort, resolveModelReasoningControl } =
       await importFreshEffortModule()
 
-    expect(modelSupportsEffort('gpt-4o', zenContext())).toBe(false)
+    expect(modelSupportsEffort('gpt-4o', laneContext())).toBe(false)
     expect(
-      resolveModelReasoningControl('gpt-4o', zenContext()).controllable,
+      resolveModelReasoningControl('gpt-4o', laneContext()).controllable,
     ).toBe(false)
   })
 
   test('entry without supportsEffort stays non-controllable', async () => {
-    declareZenLane({ supportsEffort: false })
+    declareExampleLane({ supportsEffort: false })
     const { modelSupportsEffort } = await importFreshEffortModule()
 
-    expect(modelSupportsEffort(SPARK_MODEL, zenContext())).toBe(false)
+    expect(modelSupportsEffort(EXAMPLE_MODEL, laneContext())).toBe(false)
   })
 
   test('explicit tier false wins over a matching entry', async () => {
-    declareZenLane()
+    declareExampleLane()
     // Pin the model in a tier WITHOUT the effort capability: the tier
     // override resolves false and must beat the entry.
-    process.env.ANTHROPIC_DEFAULT_SONNET_MODEL = SPARK_MODEL
+    process.env.ANTHROPIC_DEFAULT_SONNET_MODEL = EXAMPLE_MODEL
     process.env.ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES = 'thinking'
     const { modelSupportsEffort, resolveModelReasoningControl } =
       await importFreshEffortModule()
 
-    expect(modelSupportsEffort(SPARK_MODEL, zenContext())).toBe(false)
+    expect(modelSupportsEffort(EXAMPLE_MODEL, laneContext())).toBe(false)
     expect(
-      resolveModelReasoningControl(SPARK_MODEL, zenContext()).controllable,
+      resolveModelReasoningControl(EXAMPLE_MODEL, laneContext()).controllable,
     ).toBe(false)
   })
 
   test('explicit tier true keeps the existing resolution (entry ignored)', async () => {
-    declareZenLane({ effortLevels: ['low'] })
-    process.env.ANTHROPIC_DEFAULT_SONNET_MODEL = SPARK_MODEL
+    declareExampleLane({ effortLevels: ['low'] })
+    process.env.ANTHROPIC_DEFAULT_SONNET_MODEL = EXAMPLE_MODEL
     process.env.ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES =
       'effort,max_effort,xhigh_effort'
     const { resolveModelReasoningControl } = await importFreshEffortModule()
 
-    expect(resolveModelReasoningControl(SPARK_MODEL, zenContext())).toMatchObject({
+    expect(resolveModelReasoningControl(EXAMPLE_MODEL, laneContext())).toMatchObject({
       controllable: true,
       levels: ['low', 'medium', 'high', 'xhigh', 'max'],
       wireFormat: 'reasoning_effort',
@@ -578,24 +578,24 @@ describe('customProviders declared-lane effort (§3.2)', () => {
   })
 
   test('settings edits take effect without a restart (no stale memo)', async () => {
-    declareZenLane()
+    declareExampleLane()
     const { modelSupportsEffort } = await importFreshEffortModule()
-    const context = zenContext()
+    const context = laneContext()
 
-    expect(modelSupportsEffort(SPARK_MODEL, context)).toBe(true)
+    expect(modelSupportsEffort(EXAMPLE_MODEL, context)).toBe(true)
 
     // Flip the lane off mid-session: the same module instance must observe it.
-    declareZenLane({ supportsEffort: false })
-    expect(modelSupportsEffort(SPARK_MODEL, context)).toBe(false)
+    declareExampleLane({ supportsEffort: false })
+    expect(modelSupportsEffort(EXAMPLE_MODEL, context)).toBe(false)
   })
 
   test('env base URL fallback covers callers without context baseUrl', async () => {
-    declareZenLane()
-    process.env.OPENAI_BASE_URL = ZEN_BASE_URL
+    declareExampleLane()
+    process.env.OPENAI_BASE_URL = EXAMPLE_BASE_URL
     const { modelSupportsEffort } = await importFreshEffortModule()
 
     expect(
-      modelSupportsEffort(SPARK_MODEL, {
+      modelSupportsEffort(EXAMPLE_MODEL, {
         apiProvider: 'openai' as const,
         routeId: 'custom',
         useRuntimeFallback: false,

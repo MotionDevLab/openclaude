@@ -90,7 +90,7 @@ function entryName(entry: unknown, index: number): string {
 
 /**
  * Validate one `customProviders` entry, returning human-readable problems
- * that name the entry and the field (e.g. `customProviders["zen-router"].baseUrl`).
+ * that name the entry and the field (e.g. `customProviders["example-lane"].baseUrl`).
  * By design there is no `apiKey` field: secrets stay in env files / shell env,
  * never in `settings.json`.
  */

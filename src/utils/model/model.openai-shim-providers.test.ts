@@ -363,36 +363,36 @@ test('getSmallFastModel returns OPENAI_MODEL for Xiaomi MiMo', async () => {
 test('getSmallFastModel prefers the matched customProviders smallModel', async () => {
   activeCustomProvidersOverride = [
     {
-      id: 'zen-router',
-      label: 'OpenCode Zen Router',
-      baseUrl: 'http://127.0.0.1:18905/zen/v1',
-      smallModel: 'nemotron-3.5-lightning-free',
+      id: 'example-lane',
+      label: 'Example Gateway',
+      baseUrl: 'http://127.0.0.1:8080/v1',
+      smallModel: 'example-small-model',
     },
   ]
   process.env.CLAUDE_CODE_USE_OPENAI = '1'
-  process.env.OPENAI_BASE_URL = 'http://127.0.0.1:18905/zen/v1'
-  process.env.OPENAI_MODEL = 'muse-spark-1.3-contributor-free'
+  process.env.OPENAI_BASE_URL = 'http://127.0.0.1:8080/v1'
+  process.env.OPENAI_MODEL = 'example-model'
   // The lane entry wins over the env chain, not the other way around.
   process.env.ANTHROPIC_SMALL_FAST_MODEL = 'env-small-model'
 
   const { getSmallFastModel } = await importFreshModelModule()
-  expect(getSmallFastModel()).toBe('nemotron-3.5-lightning-free')
+  expect(getSmallFastModel()).toBe('example-small-model')
 })
 
 test('getSmallFastModel falls through when the lane declares no smallModel', async () => {
   activeCustomProvidersOverride = [
     {
-      id: 'zen-router',
-      label: 'OpenCode Zen Router',
-      baseUrl: 'http://127.0.0.1:18905/zen/v1',
+      id: 'example-lane',
+      label: 'Example Gateway',
+      baseUrl: 'http://127.0.0.1:8080/v1',
     },
   ]
   process.env.CLAUDE_CODE_USE_OPENAI = '1'
-  process.env.OPENAI_BASE_URL = 'http://127.0.0.1:18905/zen/v1'
-  process.env.OPENAI_MODEL = 'muse-spark-1.3-contributor-free'
+  process.env.OPENAI_BASE_URL = 'http://127.0.0.1:8080/v1'
+  process.env.OPENAI_MODEL = 'example-model'
 
   const { getSmallFastModel } = await importFreshModelModule()
-  expect(getSmallFastModel()).toBe('muse-spark-1.3-contributor-free')
+  expect(getSmallFastModel()).toBe('example-model')
 })
 
 test('getSmallFastModel ignores lane entries off OpenAI-shim providers', async () => {

@@ -472,7 +472,7 @@ function resolveConfigured3PReasoningControl(
   }
 
   // No tier pin: consult the matched customProviders entry so a declared lane
-  // (e.g. spark via zen-router, Inkling via OpenRouter-direct) gets the same
+  // (e.g. a lane model via a custom gateway, Inkling via OpenRouter-direct) gets the same
   // controllable `reasoning_effort` resolution. Gated to OpenAI-shim lanes so
   // a wildcard entry plus stale OPENAI_* shell env cannot leak lane behavior
   // into Anthropic/Bedrock/Vertex/Gemini sessions. Settings are read live on
