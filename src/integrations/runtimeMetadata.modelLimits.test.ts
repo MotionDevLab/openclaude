@@ -235,3 +235,22 @@ test('resolveModelRuntimeLimits lets settings modelLimits beat discovery cache',
     rmSync(tempDir, { recursive: true, force: true })
   }
 })
+
+test('family-prefix env override covers any model variant', async () => {
+  // Characterization: a family prefix in CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS
+  // covers model variants with no catalog entry, without a per-model pin.
+  mockSettings = {}
+  const { resolveModelRuntimeLimits } = await importFresh()
+
+  const res = resolveModelRuntimeLimits({
+    model: 'muse-spark-1.3-free-test-variant',
+    processEnv: {
+      CLAUDE_CODE_USE_OPENAI: '1',
+      OPENAI_BASE_URL: 'https://example.test/v1',
+      OPENAI_MODEL: 'muse-spark-1.3-free-test-variant',
+      CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS: '{"muse-spark":1000000}',
+    },
+  })
+
+  expect(res.contextWindow).toBe(1000000)
+})
