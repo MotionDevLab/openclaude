@@ -9,6 +9,7 @@ import {
   renderIssueReport,
   writeIssueReport,
 } from '../../utils/diagnostics/issueReport.js'
+import { runPromptAudit } from '../../utils/doctorPromptAudit.js'
 
 export function splitDoctorArgs(args: string): string[] {
   const parts: string[] = []
@@ -76,6 +77,24 @@ const defaultDoctorReportDependencies: DoctorReportDependencies = {
   writeIssueReport,
 }
 
+type DoctorPromptAuditDependencies = {
+  runPromptAudit: typeof runPromptAudit
+}
+
+const defaultDoctorPromptAuditDependencies: DoctorPromptAuditDependencies = {
+  runPromptAudit,
+}
+
+export async function runDoctorPromptAuditCommand(
+  args: string[],
+  onDone: LocalJSXCommandOnDone,
+  dependencies: DoctorPromptAuditDependencies = defaultDoctorPromptAuditDependencies,
+): Promise<null> {
+  const report = await dependencies.runPromptAudit(process.cwd(), args[0])
+  onDone(report, { display: 'system' })
+  return null
+}
+
 export async function runDoctorReportCommand(
   args: string[],
   onDone: LocalJSXCommandOnDone,
@@ -99,11 +118,15 @@ export async function runDoctorReportCommand(
 
 export function createDoctorCommandCall(
   dependencies: DoctorReportDependencies = defaultDoctorReportDependencies,
+  promptAuditDependencies: DoctorPromptAuditDependencies = defaultDoctorPromptAuditDependencies,
 ): LocalJSXCommandCall {
   return async (onDone, _context, args) => {
     const parts = splitDoctorArgs(args)
     if (parts[0]?.toLowerCase() === 'report') {
       return runDoctorReportCommand(parts.slice(1), onDone, dependencies)
+    }
+    if (parts[0]?.toLowerCase() === 'prompt-audit') {
+      return runDoctorPromptAuditCommand(parts.slice(1), onDone, promptAuditDependencies)
     }
 
     return Promise.resolve(<Doctor onDone={onDone} />);
