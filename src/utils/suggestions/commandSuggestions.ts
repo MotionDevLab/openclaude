@@ -64,13 +64,42 @@ function safeCommandAliases(
   }
 }
 
-function safeArgumentHint(command: Command): string | undefined {
+/**
+ * Read a command's `argumentHint` getter without letting a throw propagate.
+ * Returns undefined when the hint can't be resolved, so a broken hint omits
+ * only the hint while the base description stays intact.
+ */
+export function safeArgumentHint(command: Command): string | undefined {
   try {
     return command.argumentHint
   } catch (err) {
     warnBrokenCommand(safeCommandName(command) ?? 'unknown', err)
     return undefined
   }
+}
+
+/**
+ * Check whether a lowercased query occurs in a lowercased hint at a token
+ * boundary — the match starts the hint or follows a non-alphanumeric
+ * character. Keeps subcommand discovery ("prompt-audit", "--out") while a
+ * mid-word substring ("eport" in "report") does not match.
+ */
+function hintMatchesAtTokenBoundary(
+  hint: string | undefined,
+  query: string,
+): boolean {
+  if (!hint) {
+    return false
+  }
+  let index = hint.indexOf(query)
+  while (index !== -1) {
+    const prev = index === 0 ? '' : (hint[index - 1] ?? '')
+    if (!/[a-z0-9]/.test(prev)) {
+      return true
+    }
+    index = hint.indexOf(query, index + 1)
+  }
+  return false
 }
 
 // Treat these characters as word separators for command search
@@ -495,12 +524,15 @@ function getRenderedCommandDescription(cmd: Command): string {
     const description = isWorkflow
       ? cmd.description
       : formatDescriptionWithSource(cmd)
+    // Read the hint through the safe accessor: a throwing hint getter must
+    // omit only the hint, not wipe the base description via the catch below.
+    const hint = safeArgumentHint(cmd)
     return (
       description +
       (cmd.type === 'prompt' && cmd.argNames?.length
         ? ` (arguments: ${cmd.argNames.join(', ')})`
         : '') +
-      (cmd.argumentHint ? ` — ${cmd.argumentHint}` : '')
+      (hint ? ` — ${hint}` : '')
     )
   } catch (err) {
     warnBrokenCommand(safeCommandName(cmd) ?? 'unknown', err)
@@ -695,13 +727,19 @@ export function generateCommandSuggestions(
   // visible in a command identifier: the command name or an alias. Separator-
   // delimited command-name parts still affect ranking for word-boundary hits.
   // Fuse contributes ranking, but description-only and typo-fuzzy matches are
-  // not eligible for display.
+  // not eligible for display. The argumentHint is the one exception: a query
+  // anchored at a hint token boundary (e.g. "prompt-audit", "--out") keeps
+  // subcommand discovery working, while mid-word substrings ("eport" inside
+  // "report") must not surface unrelated commands.
   const includesQuery = (value: string) => value.includes(query)
   const startsWithQuery = (value: string) => value.startsWith(query)
   const matchesIdentifier = (item: (typeof withMeta)[number]) =>
     includesQuery(item.name) ||
     item.aliases.some(includesQuery) ||
-    (safeArgumentHint(item.command)?.toLowerCase().includes(query) ?? false)
+    hintMatchesAtTokenBoundary(
+      safeArgumentHint(item.command)?.toLowerCase(),
+      query,
+    )
 
   const getMatchRank = (item: (typeof withMeta)[number]): number => {
     if (item.name === query) return 0

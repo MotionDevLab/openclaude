@@ -90,4 +90,35 @@ describe('HelpV2 Commands argumentHint', () => {
     expect(out).toContain('Change model')
     expect(out).not.toContain(' — ')
   })
+
+  test('throwing argumentHint getter still renders the base row', async () => {
+    const broken = {
+      type: 'local-jsx',
+      name: 'doctor',
+      get description(): string {
+        return 'Diagnose and verify your OpenClaude installation'
+      },
+      get argumentHint(): string {
+        throw new Error('no hint')
+      },
+      isHidden: false,
+      progressMessage: 'running',
+      contentLength: 0,
+      getPromptForCommand: async () => [],
+    } as unknown as Command
+
+    const out = await renderToString(
+      <Commands
+        commands={[broken]}
+        maxHeight={30}
+        columns={120}
+        title="Browse default commands:"
+        onCancel={() => {}}
+      />,
+      120,
+    )
+
+    expect(out).toContain('/doctor')
+    expect(out).toContain('Diagnose and verify your OpenClaude installation')
+  })
 })
