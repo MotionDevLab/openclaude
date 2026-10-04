@@ -740,6 +740,16 @@ bun run hardening:check
 bun run hardening:strict
 ```
 
+Run these from the REPL prompt (slash commands, not shell commands):
+
+```text
+# audit prompt files (memory, skills, agents, commands) for stale refs and legacy patterns
+/doctor prompt-audit
+
+# scope the audit to matching paths
+/doctor prompt-audit .openclaude/rules
+```
+
 Notes:
 
 - `doctor:runtime` fails fast if `CLAUDE_CODE_USE_OPENAI=1` with a placeholder key or a missing key for non-local providers.
@@ -747,6 +757,7 @@ Notes:
 - Local providers such as `http://localhost:11434/v1`, `http://10.0.0.1:11434/v1`, and `http://127.0.0.1:1337/v1` can run without `OPENAI_API_KEY`.
 - Codex profiles validate `CODEX_API_KEY` or the Codex CLI auth file and probe `POST /responses` instead of `GET /models`.
 - `openclaude doctor report` is redacted by default and is intended for GitHub issues. It summarizes provider/runtime/build/settings state without prompts, transcripts, raw settings files, API keys, MCP command details, or full home-directory paths.
+- `/doctor prompt-audit` (REPL slash command, no CLI equivalent) runs deterministic static checks over prompt-bearing files (memory, skills, agents, commands): stale file paths, stale `/command` references, duplicated blocks, legacy patterns (`{$var}`, `.claude/`, `CLAUDE_CODE_`), and files that failed to load. Findings are capped per category. It makes no model calls; pass an optional path to limit the audit to matching files.
 - `openclaude report --json` and `openclaude report --markdown` summarize observed session facts such as tool uses, Bash commands, validation commands, changed files, branch metadata, warnings, and linked issue/PR references. Use `--transcript <file>` for an explicit transcript, `--session <id>` for a stored session, or omit both to report the latest session for the current project. Large previews are truncated and credential-shaped strings are redacted. When no validation command is observed, the report keeps `validations` empty and includes a warning instead of claiming checks passed.
 
 ## Provider Launch Profiles
