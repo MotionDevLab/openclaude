@@ -1,5 +1,11 @@
+import chalk from 'chalk'
 import type { ModelCatalogEntry } from '../../integrations/descriptors.js'
 import type { ModelOption } from './modelOptions.js'
+
+function formatWindow(window: number): string {
+  if (window >= 1000000) return `${Math.round(window / 1048576)}M context`
+  return `${Math.round(window / 1024)}K context`
+}
 
 function toDescription(
   entry: ModelCatalogEntry,
@@ -11,6 +17,11 @@ function toDescription(
 
   if (isRecommended) {
     parts.push('Recommended')
+  }
+  if (entry.contextWindow !== undefined) {
+    parts.push(chalk.green(formatWindow(entry.contextWindow)))
+  } else {
+    parts.push(chalk.yellow('⚠ fallback 128K'))
   }
   if (entry.notes?.trim()) {
     parts.push(entry.notes.trim())
@@ -82,6 +93,7 @@ export function buildRouteCatalogModelOptions(
         label === value
           ? description
           : `${description} (${value})`,
+      ...(entry.contextWindow === undefined ? { dimDescription: false as const } : {}),
     })
   }
 

@@ -2,6 +2,7 @@ import { PassThrough } from 'node:stream'
 
 import { afterEach, beforeEach, expect, mock, setSystemTime, test } from 'bun:test'
 import React from 'react'
+import chalk from 'chalk'
 
 import { getAdditionalModelOptionsCacheScope } from '../../services/api/providerConfig.js'
 import {
@@ -1331,8 +1332,9 @@ test('/model applies providerProfileModelPickerMode profile override on descript
     {
       value: activeProfile.model,
       label: activeProfile.model,
-      description: 'Provider: OpenRouter',
-      descriptionForModel: 'Provider: OpenRouter',
+      description: `${chalk.yellow('⚠ fallback 128K')} · Provider: OpenRouter`,
+      descriptionForModel: `${chalk.yellow('⚠ fallback 128K')} · Provider: OpenRouter`,
+      dimDescription: false,
     },
   ])
 })
@@ -1379,8 +1381,9 @@ test('/model applies auto profile surface for multi-model descriptor profiles', 
       {
         value: 'openai/gpt-oss-120b:free',
         label: 'openai/gpt-oss-120b:free',
-        description: 'Provider: OpenRouter',
-        descriptionForModel: 'Provider: OpenRouter',
+        description: `${chalk.yellow('⚠ fallback 128K')} · Provider: OpenRouter`,
+        descriptionForModel: `${chalk.yellow('⚠ fallback 128K')} · Provider: OpenRouter`,
+        dimDescription: false,
       },
       {
         value: 'custom/private-model',
@@ -1436,33 +1439,38 @@ test('/model applies auto provider surface for single-model descriptor profiles'
       {
         value: 'openai/gpt-5-mini',
         label: 'GPT-5 Mini (via OpenRouter)',
-        description: 'Recommended · Provider: OpenRouter',
+        description: `Recommended · ${chalk.yellow('⚠ fallback 128K')} · Provider: OpenRouter`,
         descriptionForModel:
-          'Recommended · Provider: OpenRouter (openai/gpt-5-mini)',
+          `Recommended · ${chalk.yellow('⚠ fallback 128K')} · Provider: OpenRouter (openai/gpt-5-mini)`,
+        dimDescription: false,
       },
       {
         value: 'x-ai/grok-4.6',
         label: 'Grok 4.6 (via OpenRouter)',
-        description: 'Provider: OpenRouter',
-        descriptionForModel: 'Provider: OpenRouter (x-ai/grok-4.6)',
+        description: `${chalk.yellow('⚠ fallback 128K')} · Provider: OpenRouter`,
+        descriptionForModel: `${chalk.yellow('⚠ fallback 128K')} · Provider: OpenRouter (x-ai/grok-4.6)`,
+        dimDescription: false,
       },
       {
         value: 'x-ai/grok-4.5',
         label: 'Grok 4.5 (via OpenRouter)',
-        description: 'Provider: OpenRouter',
-        descriptionForModel: 'Provider: OpenRouter (x-ai/grok-4.5)',
+        description: `${chalk.yellow('⚠ fallback 128K')} · Provider: OpenRouter`,
+        descriptionForModel: `${chalk.yellow('⚠ fallback 128K')} · Provider: OpenRouter (x-ai/grok-4.5)`,
+        dimDescription: false,
       },
       {
         value: activeProfile.model,
         label: activeProfile.model,
-        description: 'Provider: OpenRouter',
-        descriptionForModel: 'Provider: OpenRouter',
+        description: `${chalk.yellow('⚠ fallback 128K')} · Provider: OpenRouter`,
+        descriptionForModel: `${chalk.yellow('⚠ fallback 128K')} · Provider: OpenRouter`,
+        dimDescription: false,
       },
       {
         value: 'openai/gpt-5',
         label: 'openai/gpt-5',
-        description: 'Provider: OpenRouter',
-        descriptionForModel: 'Provider: OpenRouter',
+        description: `${chalk.yellow('⚠ fallback 128K')} · Provider: OpenRouter`,
+        descriptionForModel: `${chalk.yellow('⚠ fallback 128K')} · Provider: OpenRouter`,
+        dimDescription: false,
       },
     ])
   } finally {
@@ -1862,33 +1870,38 @@ test('/model applies providerProfileModelPickerMode provider override on descrip
       {
         value: 'openai/gpt-5-mini',
         label: 'GPT-5 Mini (via OpenRouter)',
-        description: 'Recommended · Provider: OpenRouter',
+        description: `Recommended · ${chalk.yellow('⚠ fallback 128K')} · Provider: OpenRouter`,
         descriptionForModel:
-          'Recommended · Provider: OpenRouter (openai/gpt-5-mini)',
+          `Recommended · ${chalk.yellow('⚠ fallback 128K')} · Provider: OpenRouter (openai/gpt-5-mini)`,
+        dimDescription: false,
       },
       {
         value: 'x-ai/grok-4.6',
         label: 'Grok 4.6 (via OpenRouter)',
-        description: 'Provider: OpenRouter',
-        descriptionForModel: 'Provider: OpenRouter (x-ai/grok-4.6)',
+        description: `${chalk.yellow('⚠ fallback 128K')} · Provider: OpenRouter`,
+        descriptionForModel: `${chalk.yellow('⚠ fallback 128K')} · Provider: OpenRouter (x-ai/grok-4.6)`,
+        dimDescription: false,
       },
       {
         value: 'x-ai/grok-4.5',
         label: 'Grok 4.5 (via OpenRouter)',
-        description: 'Provider: OpenRouter',
-        descriptionForModel: 'Provider: OpenRouter (x-ai/grok-4.5)',
+        description: `${chalk.yellow('⚠ fallback 128K')} · Provider: OpenRouter`,
+        descriptionForModel: `${chalk.yellow('⚠ fallback 128K')} · Provider: OpenRouter (x-ai/grok-4.5)`,
+        dimDescription: false,
       },
       {
         value: 'openai/gpt-oss-120b:free',
         label: 'openai/gpt-oss-120b:free',
-        description: 'Provider: OpenRouter',
-        descriptionForModel: 'Provider: OpenRouter',
+        description: `${chalk.yellow('⚠ fallback 128K')} · Provider: OpenRouter`,
+        descriptionForModel: `${chalk.yellow('⚠ fallback 128K')} · Provider: OpenRouter`,
+        dimDescription: false,
       },
       {
         value: 'openai/gpt-5',
         label: 'openai/gpt-5',
-        description: 'Provider: OpenRouter',
-        descriptionForModel: 'Provider: OpenRouter',
+        description: `${chalk.yellow('⚠ fallback 128K')} · Provider: OpenRouter`,
+        descriptionForModel: `${chalk.yellow('⚠ fallback 128K')} · Provider: OpenRouter`,
+        dimDescription: false,
       },
       {
         value: 'custom/private-model',
@@ -3286,8 +3299,9 @@ test('interactive model picker refresh keeps descriptor options allowlist-filter
       {
         value: 'allowed-route',
         label: 'allowed-route',
-        description: 'Provider: OpenRouter',
-        descriptionForModel: 'Provider: OpenRouter',
+        description: `${chalk.yellow('⚠ fallback 128K')} · Provider: OpenRouter`,
+        descriptionForModel: `${chalk.yellow('⚠ fallback 128K')} · Provider: OpenRouter`,
+        dimDescription: false,
       },
     ])
 
@@ -3302,8 +3316,9 @@ test('interactive model picker refresh keeps descriptor options allowlist-filter
       {
         value: 'allowed-route',
         label: 'allowed-route',
-        description: 'Provider: OpenRouter',
-        descriptionForModel: 'Provider: OpenRouter',
+        description: `${chalk.yellow('⚠ fallback 128K')} · Provider: OpenRouter`,
+        descriptionForModel: `${chalk.yellow('⚠ fallback 128K')} · Provider: OpenRouter`,
+        dimDescription: false,
       },
     ])
   } finally {

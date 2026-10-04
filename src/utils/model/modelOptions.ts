@@ -61,6 +61,7 @@ export type ModelOption = {
   label: string
   description: string
   descriptionForModel?: string
+  dimDescription?: boolean
   /**
    * When set, selecting this option also activates the named provider profile
    * before switching the main-loop model. Encoded into `value` as a

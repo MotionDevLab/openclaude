@@ -61,6 +61,25 @@ What a lane gets you:
    cache → descriptor default. A per-model `modelLimits` entry still
    wins for exceptions; each field falls through independently.
 
+   Wildcard lane covering every model on the endpoint (model-agnostic,
+   no per-id entry):
+
+   ```json
+   { "id": "my-lane", "label": "My lane", "baseUrl": "https://api.example.com/v1", "models": ["*"], "contextWindow": 1000000 }
+   ```
+
+    Notes: per-model `modelLimits` still wins for exceptions; plain
+    `/set-context-window` dies with the session (pass `--save` to persist it
+    to `modelLimits`) while env / `modelLimits` / lane defaults survive
+    restart; for a permanent
+   shared fix onboard the provider via
+   `docs/integrations/how-to/add-vendor.md` + `add-model.md`
+   (`contextWindow` in `src/integrations/models/*`, then
+   `bun run integrations:generate`) — the catalog beats overrides by
+   design so it supersedes the prefix without cleanup. Use overrides
+   for any model today; use add-vendor/add-model when onboarding a
+   provider for everyone.
+
 Precedence for effort (inside one resolution): tier env override
 `=== false` wins (not controllable, even over a matching entry), else
 tier `=== true` keeps the existing resolution, else a matching entry

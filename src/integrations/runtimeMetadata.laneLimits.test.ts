@@ -251,3 +251,28 @@ test('resolveModelRuntimeLimits matches ?runtime suffix variants to a scoped lan
 
   expect(limits.contextWindow).toBe(128_000)
 })
+
+test('wildcard lane supplies 1M to unknown variant', async () => {
+  // Characterization: a wildcard `models: ['*']` lane default covers a model
+  // with no per-model pin, without a catalog entry. Entries are passed
+  // explicitly to avoid settings I/O.
+  const { getCustomProviderLimits } = await import(
+    '../utils/customProviders.js'
+  )
+
+  const limits = getCustomProviderLimits(
+    'https://example.test/v1',
+    'brand-new-model-99',
+    [
+      {
+        id: 'test-lane',
+        label: 'Test',
+        baseUrl: 'https://example.test/v1',
+        models: ['*'],
+        contextWindow: 1000000,
+      },
+    ],
+  )
+
+  expect(limits.contextWindow).toBe(1000000)
+})

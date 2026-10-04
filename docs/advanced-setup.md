@@ -584,8 +584,28 @@ addition to the `CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS` /
   limit turns early auto-compact into a mid-session API failure. If you know the
   real window, use an **exact** `CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS` entry for a
   catalogued model. For a custom or discovered model, use `modelLimits` or an
-  exact env entry. Use `/set-context-window <tokens>` for the current session
-  only.
+   exact env entry. Use `/set-context-window <tokens>` for the current session
+   only, or append `--save` to persist it to `modelLimits`.
+
+Family prefix covers all variants (model-agnostic, no per-id entry):
+
+```bash
+export CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS='{"muse-spark":1000000,"qwen3":262144}'
+```
+
+Per-endpoint variant via host-qualified key:
+
+```bash
+export CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS='{"api.example.com:muse-spark-1.3":1000000}'
+```
+
+`settings.json` equivalent (prefix match supported):
+
+```json
+{ "modelLimits": { "muse-spark": { "contextWindow": 1000000 } } }
+```
+
+Use overrides for any model today; use add-vendor/add-model when onboarding a provider for everyone.
 
 ### Exact-model pricing overrides (`settings.json`)
 

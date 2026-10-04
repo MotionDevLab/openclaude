@@ -1034,7 +1034,10 @@ async function* queryLoop(
       appendSystemContext(asSystemPrompt(promptWithArc), systemContext),
     )
 
-    // Force compaction if memory pressure detected or message count exceeded.
+    // Force compaction if memory pressure detected or message count exceeded (default 200, see normalizeMaxMessagesCompactionThreshold).
+    // Token-threshold path logs `autocompact: tokens=... threshold=... effectiveWindow=...` in autoCompact.ts:398.
+    // Forced path logs `skipping token threshold check (forced by message-count)` in autoCompact.ts:388.
+    // When triaging catalog-install sessions at low token %, check which log line fired.
     // Sets forceReason on tracking so autoCompactIfNeeded bypasses the
     // token-threshold check. Consumed once (one-shot) inside autocompact.
     // Skip for compact/session_memory sources — those run inside an existing
