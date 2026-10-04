@@ -165,6 +165,22 @@ export const CustomProviderEntrySchema = z
       .describe(
         'Per-lane small/fast model for background chores (token estimation, hook models, search planning, summaries).',
       ),
+    contextWindow: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe(
+        'Lane-default total context window in tokens. Applies to every model served on this lane unless a more specific pin wins (exact env override, built-in catalog, env prefix, per-model modelLimits).',
+      ),
+    maxOutputTokens: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe(
+        'Lane-default maximum output tokens per response. Same precedence as contextWindow.',
+      ),
   })
   .strict()
 
