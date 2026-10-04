@@ -441,6 +441,7 @@ function createCompactionResultFromSessionMemory(
   hookResults: HookResultMessage[],
   transcriptPath: string,
   agentId?: AgentId,
+  forceReason?: 'memory-pressure' | 'message-count' | 'context-overflow',
 ): CompactionResult {
   const preCompactTokenCount = tokenCountFromLastAPIResponse(messages)
 
@@ -448,6 +449,9 @@ function createCompactionResultFromSessionMemory(
     'auto',
     preCompactTokenCount ?? 0,
     messages[messages.length - 1]?.uuid,
+    undefined,
+    undefined,
+    forceReason,
   )
   const preCompactDiscovered = extractDiscoveredToolNames(messages)
   if (preCompactDiscovered.size > 0) {
@@ -515,6 +519,7 @@ export async function trySessionMemoryCompaction(
   messages: Message[],
   agentId?: AgentId,
   autoCompactThreshold?: number,
+  forceReason?: 'memory-pressure' | 'message-count' | 'context-overflow',
 ): Promise<CompactionResult | null> {
   if (!shouldUseSessionMemoryCompaction()) {
     return null
@@ -595,6 +600,7 @@ export async function trySessionMemoryCompaction(
       hookResults,
       transcriptPath,
       agentId,
+      forceReason,
     )
 
     const postCompactMessages = buildPostCompactMessages(compactionResult)

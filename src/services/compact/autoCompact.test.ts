@@ -719,6 +719,35 @@ describe('autoCompactIfNeeded circuit breaker', () => {
     expect(result.consecutiveFailures).toBe(0)
   })
 
+  test('forced compaction threads the force reason into compactConversation', async () => {
+    const compactConversation = mock(
+      async (..._args: unknown[]) => compactResult(),
+    )
+    const trySessionMemoryCompaction = mock(async () => null)
+    const { autoCompactIfNeeded } = await importAutoCompact({
+      compactConversation,
+      trySessionMemoryCompaction,
+    })
+
+    const messages = underThresholdMessages()
+    const result = await autoCompactIfNeeded(
+      messages,
+      toolUseContext(),
+      cacheSafeParams(messages),
+      'repl_main_thread',
+      {
+        compacted: false,
+        turnCounter: 0,
+        turnId: 'turn',
+        forceReason: 'memory-pressure',
+      },
+    )
+
+    expect(result.wasCompacted).toBe(true)
+    expect(compactConversation).toHaveBeenCalledTimes(1)
+    expect(compactConversation.mock.calls[0][7]).toBe('memory-pressure')
+  })
+
   test('memory-pressure signals honor disabled auto-compact', async () => {
     const compactConversation = mock(async () => compactResult())
     const trySessionMemoryCompaction = mock(async () => null)

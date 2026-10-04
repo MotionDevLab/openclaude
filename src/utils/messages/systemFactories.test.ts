@@ -196,6 +196,22 @@ test('microcompact and API error factories preserve branch-specific fields', () 
   ).toBeUndefined()
 })
 
+test('compact boundary records the force reason when compaction was forced', () => {
+  const forced = createCompactBoundaryMessage(
+    'auto',
+    57591,
+    undefined,
+    undefined,
+    undefined,
+    'memory-pressure',
+  )
+  expect(forced.compactMetadata.trigger).toBe('auto')
+  expect(forced.compactMetadata.forceReason).toBe('memory-pressure')
+
+  const threshold = createCompactBoundaryMessage('auto', 57591)
+  expect(threshold.compactMetadata.forceReason).toBeUndefined()
+})
+
 test('compact boundary helpers find and slice from the latest boundary', () => {
   const first = createSystemMessage('old', 'info')
   const boundary = createCompactBoundaryMessage('manual', 100)

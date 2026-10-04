@@ -424,6 +424,7 @@ export async function compactConversation(
   customInstructions?: string,
   isAutoCompact: boolean = false,
   recompactionInfo?: RecompactionInfo,
+  forceReason?: 'memory-pressure' | 'message-count' | 'context-overflow',
 ): Promise<CompactionResult> {
   try {
     if (messages.length === 0) {
@@ -647,6 +648,9 @@ export async function compactConversation(
       isAutoCompact ? 'auto' : 'manual',
       preCompactTokenCount ?? 0,
       messages.at(-1)?.uuid,
+      undefined,
+      undefined,
+      forceReason,
     )
     // Carry loaded-tool state — the summary doesn't preserve tool_reference
     // blocks, so the post-compact schema filter needs this to keep sending
