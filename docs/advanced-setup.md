@@ -585,7 +585,7 @@ addition to the `CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS` /
   real window, use an **exact** `CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS` entry for a
   catalogued model. For a custom or discovered model, use `modelLimits` or an
    exact env entry. Use `/set-context-window <tokens>` for the current session
-   only.
+   only, or append `--save` to persist it to `modelLimits`.
 
 Family prefix covers all variants (model-agnostic, no per-id entry):
 

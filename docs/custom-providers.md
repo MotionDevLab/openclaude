@@ -68,9 +68,10 @@ What a lane gets you:
    { "id": "my-lane", "label": "My lane", "baseUrl": "https://api.example.com/v1", "models": ["*"], "contextWindow": 1000000 }
    ```
 
-   Notes: per-model `modelLimits` still wins for exceptions; session
-   `/set-context-window` dies with the session while env /
-   `modelLimits` / lane defaults survive restart; for a permanent
+    Notes: per-model `modelLimits` still wins for exceptions; plain
+    `/set-context-window` dies with the session (pass `--save` to persist it
+    to `modelLimits`) while env / `modelLimits` / lane defaults survive
+    restart; for a permanent
    shared fix onboard the provider via
    `docs/integrations/how-to/add-vendor.md` + `add-model.md`
    (`contextWindow` in `src/integrations/models/*`, then

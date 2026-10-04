@@ -4,18 +4,22 @@ import {
   getSessionContextWindowOverride,
   getSessionContextWindowOverrides,
 } from '../../utils/context.js'
+import { updateSettingsForSource } from '../../utils/settings/settings.js'
 
-const HELP = `Usage: /set-context-window [model] <tokens>
+const HELP = `Usage: /set-context-window [model] <tokens> [--save]
 
 Set a session-scoped context window override. Defaults to the active model.
 
 Examples:
   /set-context-window 256000
   /set-context-window gpt-4o 200000
+  /set-context-window gpt-4o 200000 --save
   /set-context-window status
 
 The override takes precedence over discovery, catalog, and provider defaults
 for this session only. Use /clear-context-window to remove it.
+Pass --save to also persist it to settings.json modelLimits so it survives
+restarts (deep-merged: sibling keys like maxOutputTokens are preserved).
 
 For a permanent override (survives restart), use modelLimits in settings.json
 for custom/discovered models, for example:
@@ -45,7 +49,9 @@ export const call: LocalCommandCall = async (args, context) => {
     return { type: 'text', value: `Active context window overrides:\n${lines}` }
   }
 
-  const parts = trimmed.split(/\s+/)
+  const rawParts = trimmed.split(/\s+/)
+  const save = rawParts.includes('--save')
+  const parts = rawParts.filter(part => part !== '--save')
 
   let model: string
   let tokensStr: string
@@ -75,8 +81,19 @@ export const call: LocalCommandCall = async (args, context) => {
   const prevDisplay = previous !== undefined
     ? `${previous.toLocaleString()} tokens`
     : 'none (using default)'
-  return {
-    type: 'text',
-    value: `Context window for "${result.normalizedModel}" set to ${tokens.toLocaleString()} tokens (session only).\nPrevious: ${prevDisplay}`,
+  const scopeDisplay = save ? 'session + saved to settings.json modelLimits' : 'session only'
+  let value = `Context window for "${result.normalizedModel}" set to ${tokens.toLocaleString()} tokens (${scopeDisplay}).\nPrevious: ${prevDisplay}`
+
+  if (save) {
+    const persisted = updateSettingsForSource('userSettings', {
+      modelLimits: { [result.normalizedModel]: { contextWindow: tokens } },
+    })
+    if (persisted.error) {
+      value += `\nWarning: session override applied but settings save failed: ${persisted.error.message}`
+    } else {
+      value += `\nPersisted to settings.json modelLimits (survives restart).`
+    }
   }
+
+  return { type: 'text', value }
 }
