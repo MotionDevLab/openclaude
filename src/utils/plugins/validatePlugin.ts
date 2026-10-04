@@ -665,6 +665,32 @@ function targetsFromServerMap(
 }
 
 /**
+ * Resolve a manifest file ref against the plugin root, rejecting refs that
+ * escape the root (e.g. `./../../outside.json`). The schema only requires a
+ * `./` prefix, so `..` segments pass parsing and `path.join` would normalize
+ * them outside the plugin dir before `readFile`/`stat` touches them.
+ * Returns undefined when the ref resolves outside; `subdir/../file.json`
+ * still resolves inside and stays allowed. No filesystem access: existence
+ * is checked by the caller after validation.
+ */
+function resolvePluginPath(
+  pluginRoot: string,
+  ref: string,
+): string | undefined {
+  const root = path.resolve(pluginRoot)
+  const target = path.resolve(root, ref)
+  const relative = path.relative(root, target)
+  if (
+    relative === '..' ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  ) {
+    return undefined
+  }
+  return target
+}
+
+/**
  * Load and shape-check servers from a referenced JSON file.
  * Findings never echo file contents — values may be secrets.
  */
@@ -674,7 +700,14 @@ async function collectMcpFileServers(
   origin: string,
   errors: ValidationError[],
 ): Promise<McpCheckTarget[]> {
-  const filePath = path.join(pluginRoot, ref)
+  const filePath = resolvePluginPath(pluginRoot, ref)
+  if (filePath === undefined) {
+    errors.push({
+      path: origin,
+      message: `MCP servers file ${ref} resolves outside the plugin root.`,
+    })
+    return []
+  }
   let content: string
   try {
     content = await readFile(filePath, { encoding: 'utf-8' })
@@ -720,8 +753,16 @@ async function validatePluginMcpServers(
         return
       }
       // Local bundle path (schema guarantees ./ prefix here).
+      const bundlePath = resolvePluginPath(pluginRoot, spec)
+      if (bundlePath === undefined) {
+        errors.push({
+          path: origin,
+          message: `MCP bundle file ${spec} resolves outside the plugin root.`,
+        })
+        return
+      }
       try {
-        await stat(path.join(pluginRoot, spec))
+        await stat(bundlePath)
       } catch (e: unknown) {
         errors.push({
           path: origin,

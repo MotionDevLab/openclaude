@@ -213,6 +213,10 @@ export function validateCustomProviders(entries: unknown): string[] {
  * (startup order in `src/entrypoints/cli.tsx`: `enableConfigs()` precedes
  * all resolution). Callers read live on every call — deliberately NOT
  * memoized — so settings edits take effect without a restart.
+ * Entries whose baseUrl fails the allowlist are excluded: startup already
+ * hard-fails on them, but settings can reload in-session, and a reloaded
+ * non-loopback `http://` lane must never become activatable (the request
+ * executor would send the API key in the clear).
  */
 export function getCustomProvidersFromSettings(): CustomProviderEntry[] {
   const settings = getSettings_DEPRECATED() as { customProviders?: unknown } | null | undefined
@@ -226,7 +230,8 @@ export function getCustomProvidersFromSettings(): CustomProviderEntry[] {
       entry !== null &&
       typeof (entry as { id?: unknown }).id === 'string' &&
       typeof (entry as { label?: unknown }).label === 'string' &&
-      typeof (entry as { baseUrl?: unknown }).baseUrl === 'string',
+      typeof (entry as { baseUrl?: unknown }).baseUrl === 'string' &&
+      isAllowedCustomProviderBaseUrl((entry as { baseUrl: string }).baseUrl),
   )
 }
 

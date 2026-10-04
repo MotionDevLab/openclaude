@@ -479,3 +479,47 @@ test(
     expect(messages(r).join('\n')).toContain('__openclaude_missing_cmd__')
   }),
 )
+
+test(
+  'rejects an MCP servers file ref that escapes the plugin root',
+  run(async root => {
+    const outsideName = `mcp-outside-${process.pid}.json`
+    const outside = join(root, '..', outsideName)
+    writeFileSync(
+      outside,
+      JSON.stringify({ ok: { command: process.execPath } }),
+      'utf8',
+    )
+    try {
+      const p = writePlugin(root, {
+        ...BASE_MANIFEST,
+        mcpServers: `./../${outsideName}`,
+      })
+      const r = await validateManifest(p)
+      expect(r.success).toBe(false)
+      expect(messages(r).join('\n')).toContain('resolves outside the plugin root')
+    } finally {
+      rmSync(outside, { force: true })
+    }
+  }),
+)
+
+test(
+  'rejects a local MCP bundle ref that escapes the plugin root',
+  run(async root => {
+    const outsideName = `mcp-outside-${process.pid}.mcpb`
+    const outside = join(root, '..', outsideName)
+    writeFileSync(outside, 'bundle-bytes', 'utf8')
+    try {
+      const p = writePlugin(root, {
+        ...BASE_MANIFEST,
+        mcpServers: `./../${outsideName}`,
+      })
+      const r = await validateManifest(p)
+      expect(r.success).toBe(false)
+      expect(messages(r).join('\n')).toContain('resolves outside the plugin root')
+    } finally {
+      rmSync(outside, { force: true })
+    }
+  }),
+)
