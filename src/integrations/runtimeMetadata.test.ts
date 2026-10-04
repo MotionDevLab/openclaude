@@ -1522,4 +1522,46 @@ describe('resolveOpenAIShimRuntimeContext - segment-boundary heuristic', () => {
     })
     expect(atlasGrok.openaiShimConfig.removeBodyFields).toContain('reasoning_effort')
   })
+
+  it('unknown family on all four integration transports falls back to 128k (custom-only bug)', async () => {
+    await withTempConfigDir(async () => {
+      const lanes: NodeJS.ProcessEnv[] = [
+        { CLAUDE_CODE_USE_OPENAI: '1', OPENAI_BASE_URL: 'http://localhost:4000/v1' },
+        { CLAUDE_CODE_USE_OPENAI: '1', OPENAI_BASE_URL: 'http://localhost:11434/v1' },
+        { MINIMAX_API_KEY: 'test-key', ANTHROPIC_BASE_URL: 'https://api.minimax.io/anthropic' },
+        { CLAUDE_CODE_USE_GEMINI: '1', GEMINI_API_KEY: 'test-key' },
+      ]
+      for (const processEnv of lanes) {
+        const res = resolveModelRuntimeLimits({
+          model: 'unknown-family-xyz-1.3-test-only',
+          processEnv,
+        })
+        // undefined here => getContextWindowForModel maps to OPENAI_FALLBACK_CONTEXT_WINDOW (128000)
+        expect(res.contextWindow).toBeUndefined()
+      }
+    })
+  })
+
+  it('catalogued opencode model keeps 1M on same lanes (control)', async () => {
+    await withTempConfigDir(async () => {
+      const res = resolveModelRuntimeLimits({
+        model: 'opencode-claude-sonnet-4-6',
+        processEnv: { CLAUDE_CODE_USE_OPENAI: '1', OPENAI_BASE_URL: 'http://localhost:4000/v1' } as NodeJS.ProcessEnv,
+      })
+      expect(res.contextWindow).toBe(1000000)
+    })
+  })
+
+  it('first-party claude model keeps 200k (control, out of scope)', async () => {
+    await withTempConfigDir(async () => {
+      // NOTE: the bare id 'claude-sonnet-4' resolves to undefined (no such
+      // descriptor); the versioned first-party id 'claude-sonnet-4-6' is the
+      // 200k control per src/integrations/models/claude.ts.
+      const res = resolveModelRuntimeLimits({
+        model: 'claude-sonnet-4-6',
+        processEnv: {} as NodeJS.ProcessEnv,
+      })
+      expect(res.contextWindow).toBe(200000)
+    })
+  })
 })
