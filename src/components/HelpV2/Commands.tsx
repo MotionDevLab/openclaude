@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import { type Command, formatDescriptionWithSource } from '../../commands.js';
 import { Box, Text } from '../../ink.js';
 import { truncate } from '../../utils/format.js';
+import { safeArgumentHint } from '../../utils/suggestions/commandSuggestions.js';
 import { Select } from '../CustomSelect/select.js';
 import { useTabHeaderFocus } from '../design-system/Tabs.js';
 type Props = {
@@ -35,11 +36,14 @@ export function Commands(t0) {
     const seen = new Set();
     let t2;
     if ($[3] !== maxWidth) {
-      t2 = cmd_0 => ({
-        label: `/${cmd_0.name}`,
-        value: cmd_0.name,
-        description: truncate(formatDescriptionWithSource(cmd_0), maxWidth, true)
-      });
+      t2 = cmd_0 => {
+        const hint = safeArgumentHint(cmd_0);
+        return {
+          label: `/${cmd_0.name}`,
+          value: cmd_0.name,
+          description: truncate(formatDescriptionWithSource(cmd_0) + (hint ? ` — ${hint}` : ''), maxWidth, true)
+        };
+      };
       $[3] = maxWidth;
       $[4] = t2;
     } else {

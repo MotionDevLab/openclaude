@@ -113,6 +113,18 @@ function isUrlRef(ref: string): boolean {
 }
 
 /**
+ * Conservative gate for `@`-refs shaped like repo paths (`@owner/repo`).
+ * Skips refs with a slash but no dot and no path prefix — prose mentions
+ * of GitHub paths and model refs (`@openai/gpt-4`). Single-token refs
+ * (`@Makefile`, `@user`) keep today's behavior.
+ */
+export function isRepoShapedRef(ref: string): boolean {
+  return (
+    ref.includes('/') && !ref.includes('.') && !/^(\.\/|\.\.\/|~\/|\/)/.test(ref)
+  )
+}
+
+/**
  * Finds @-includes and .md path references that do not exist on disk.
  * Conservative: URLs are stripped before scanning, and .md matches that are
  * part of an @-ref on the same line are reported once (as the @-ref).
@@ -137,6 +149,7 @@ export function findStaleFilePaths(
         // already safe via its trailing word boundary.
         const ref = rawRef.replace(/[.,;:!?)]+$/, '')
         if (!ref || isUrlRef(ref)) continue
+        if (isRepoShapedRef(ref)) continue
         const fullRef = `@${ref}`
         const resolved = resolvePromptRef(fullRef, file.path)
         atSpans.push({

@@ -5,6 +5,7 @@ import {
   findLegacyPatterns,
   findStaleCommandRefs,
   findStaleFilePaths,
+  isRepoShapedRef,
   LEGACY_PROMPT_PATTERNS,
   renderPromptAuditReport,
   type PromptAuditFile,
@@ -101,6 +102,63 @@ describe('findStaleFilePaths', () => {
       line: 1,
       resolved: '/proj/rules/gone.md',
     })
+  })
+
+  test('skips repo-shaped @-refs like @owner/repo prose', () => {
+    const files = [
+      file(
+        '/proj/rules/a.md',
+        'See @owner/repo for upstream.\nRead @owner/repo/sub/path here.\nModel @openai/gpt-4 is used.',
+      ),
+    ]
+
+    expect(findStaleFilePaths(files, memFs([]))).toEqual([])
+  })
+
+  test('keeps true-positive @-refs that are not repo-shaped', () => {
+    const cases = [
+      '@./missing.md',
+      '@/abs/x',
+      '@~/x',
+      '@a/b.md',
+      '@Makefile',
+      '@user',
+    ]
+    for (const ref of cases) {
+      const files = [file('/proj/rules/a.md', `See ${ref} here.`)]
+      const findings = findStaleFilePaths(files, memFs([]))
+      expect(findings.map(finding => finding.ref)).toContain(ref)
+    }
+  })
+
+  test('flags only the true positive when repo prose shares a doc with a missing ref', () => {
+    const files = [
+      file(
+        '/proj/rules/a.md',
+        'See @owner/repo for upstream.\nSee @./missing.md for details.',
+      ),
+    ]
+
+    const findings = findStaleFilePaths(files, memFs([]))
+
+    expect(findings.map(finding => finding.ref)).toEqual(['@./missing.md'])
+  })
+})
+
+describe('isRepoShapedRef', () => {
+  test.each([
+    ['owner/repo', true],
+    ['owner/repo/sub/path', true],
+    ['openai/gpt-4', true],
+    ['./missing.md', false],
+    ['/abs/x', false],
+    ['~/x', false],
+    ['a/b.md', false],
+    ['owner/repo/file.md', false],
+    ['Makefile', false],
+    ['user', false],
+  ])('isRepoShapedRef(%s) is %s', (ref, expected) => {
+    expect(isRepoShapedRef(ref)).toBe(expected)
   })
 })
 
