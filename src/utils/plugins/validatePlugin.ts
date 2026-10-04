@@ -1,9 +1,14 @@
 import type { Dirent, Stats } from 'fs'
-import { readdir, readFile, stat } from 'fs/promises'
+import { access, constants as fsConstants, readdir, readFile, stat } from 'fs/promises'
 import * as path from 'path'
 import { z } from 'zod/v4'
 import { errorMessage, getErrnoCode, isENOENT } from '../errors.js'
 import { FRONTMATTER_REGEX } from '../frontmatterParser.js'
+import { expandEnvVarsInString } from '../../services/mcp/envExpansion.js'
+import {
+  type McpServerConfig,
+  McpServerConfigSchema,
+} from '../../services/mcp/types.js'
 import { jsonParse } from '../slowOperations.js'
 import { parseYaml } from '../yaml.js'
 import {
@@ -293,6 +298,16 @@ export async function validatePluginManifest(
           'No author information provided. Consider adding author details for plugin attribution',
       })
     }
+
+    // Semantic MCP-server checks: referenced files exist and parse, stdio
+    // commands resolve, env references settle, URLs are well-formed.
+    // Post-schema, so both human and --json output pick these up.
+    const manifestDir = path.dirname(absolutePath)
+    const pluginRoot =
+      path.basename(manifestDir) === '.claude-plugin'
+        ? path.dirname(manifestDir)
+        : manifestDir
+    await validatePluginMcpServers(manifest, pluginRoot, errors, warnings)
   }
 
   return {
@@ -301,6 +316,480 @@ export async function validatePluginManifest(
     warnings,
     filePath: absolutePath,
     fileType: 'plugin',
+  }
+}
+
+// ---------------------------------------------------------------------------
+// MCP-server semantic checks (upstream parity with Claude Code v2.1.281+).
+// No network, no spawning, no connecting — and findings never echo secret
+// values, only names.
+// ---------------------------------------------------------------------------
+
+/** A server config awaiting checks, with the finding-path prefix to use. */
+type McpCheckTarget = {
+  name: string
+  config: McpServerConfig
+  /** 'mcpServers' for inline, `mcpServers["<ref>"]` for files, '.mcp.json'. */
+  origin: string
+}
+
+/** Mirrors isMcpbSource (mcpbHandler.ts) without importing the loader. */
+function isMcpbRef(source: string): boolean {
+  return source.endsWith('.mcpb') || source.endsWith('.dxt')
+}
+
+/** `${user_config.KEY}` keys referenced in a string value. */
+function extractUserConfigRefs(value: string): string[] {
+  const out: string[] = []
+  const re = /\$\{user_config\.([^}]+)\}/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(value)) !== null) out.push(m[1])
+  return out
+}
+
+function hasPlaceholder(value: string): boolean {
+  return value.includes('${')
+}
+
+/**
+ * Ambient `${VAR}` references in a value that are unset. Loader-provided
+ * names (CLAUDE_PLUGIN_ROOT, user_config.*) are excluded — they never come
+ * from the ambient environment.
+ */
+function missingAmbientVars(value: string): string[] {
+  const { missingVars } = expandEnvVarsInString(value)
+  return [
+    ...new Set(
+      missingVars.filter(
+        v => v !== 'CLAUDE_PLUGIN_ROOT' && !v.startsWith('user_config.'),
+      ),
+    ),
+  ]
+}
+
+/** `${user_config.KEY}` refs to undeclared options are errors; unset ambient
+ * vars are warnings. Names only, never values. */
+function checkMcpStringValue(
+  value: string,
+  fieldPath: string,
+  declaredUserConfig: Set<string>,
+  errors: ValidationError[],
+  warnings: ValidationWarning[],
+): void {
+  for (const key of extractUserConfigRefs(value)) {
+    if (!declaredUserConfig.has(key)) {
+      errors.push({
+        path: fieldPath,
+        message:
+          `References undeclared \${user_config.${key}}: no matching option ` +
+          `in the manifest's userConfig. The loader fails on this reference.`,
+      })
+    }
+  }
+  for (const name of missingAmbientVars(value)) {
+    warnings.push({
+      path: fieldPath,
+      message:
+        `References environment variable ${name} which is not set. ` +
+        `Set it or give the reference a default (\${${name}:-...}).`,
+    })
+  }
+}
+
+function stripCommandQuotes(command: string): string {
+  const t = command.trim()
+  if (
+    t.length >= 2 &&
+    ((t.startsWith('"') && t.endsWith('"')) ||
+      (t.startsWith("'") && t.endsWith("'")))
+  ) {
+    return t.slice(1, -1)
+  }
+  return t
+}
+
+async function isExecutableFile(p: string): Promise<boolean> {
+  try {
+    await access(p, fsConstants.X_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Resolve a stdio command the way the loader needs it: PATH lookup (with
+ * PATHEXT on Windows) for bare names, existence + executability for paths.
+ * Pure filesystem checks — never spawns. Tolerates spaces, quotes, parens.
+ */
+async function resolveStdioCommand(command: string): Promise<boolean> {
+  const cmd = stripCommandQuotes(command)
+  if (cmd.length === 0) return false
+  if (cmd.includes('/') || cmd.includes(path.sep) || path.isAbsolute(cmd)) {
+    return isExecutableFile(cmd)
+  }
+  const dirs = (process.env.PATH ?? '')
+    .split(path.delimiter)
+    .filter(d => d.length > 0)
+  for (const dir of dirs) {
+    if (await isExecutableFile(path.join(dir, cmd))) return true
+    if (process.platform === 'win32') {
+      const exts = (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD')
+        .split(';')
+        .map(e => e.trim().toLowerCase())
+        .filter(e => e.length > 0)
+      for (const ext of exts) {
+        if (cmd.toLowerCase().endsWith(ext)) continue
+        if (await isExecutableFile(path.join(dir, cmd + ext))) return true
+      }
+    }
+  }
+  return false
+}
+
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1'])
+
+/** Redact userinfo (user:pass@) before a URL ever reaches a finding. */
+function redactUrlForDisplay(url: string): string {
+  return url.replace(/^([a-zA-Z][a-zA-Z0-9+.-]*:\/\/)[^/@]*@/, '$1***@')
+}
+
+/** Remote url must be a valid absolute URL (error); http/ws to non-loopback
+ * hosts is a warning. Skipped when the url still has placeholders. */
+function checkRemoteUrl(
+  url: string,
+  urlPath: string,
+  errors: ValidationError[],
+  warnings: ValidationWarning[],
+): void {
+  if (hasPlaceholder(url)) return
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    errors.push({
+      path: urlPath,
+      message: `URL "${redactUrlForDisplay(url)}" is not a valid absolute URL.`,
+    })
+    return
+  }
+  const protocol = parsed.protocol.toLowerCase()
+  const host = parsed.hostname
+    .toLowerCase()
+    .replace(/^\[|\]$/g, '')
+    .replace(/\.$/, '')
+  if (
+    (protocol === 'http:' || protocol === 'ws:') &&
+    !LOOPBACK_HOSTS.has(host)
+  ) {
+    warnings.push({
+      path: urlPath,
+      message:
+        `URL uses ${protocol}// to a non-loopback host. ` +
+        `Prefer https:// or wss:// for remote servers.`,
+    })
+  }
+}
+
+const SECRET_HEADER_NAMES =
+  /authorization|api[_-]?key|x-api-key|token|secret|password|auth/i
+const SECRET_VALUE_SHAPES = [
+  /^\s*(bearer|basic|token)\s+\S+/i,
+  /\bsk-[A-Za-z0-9_-]{8,}\b/,
+  /\bAKIA[0-9A-Z]{16}\b/,
+  /\bxox[bap]-[A-Za-z0-9-]+\b/,
+]
+
+/** Best-effort literal-credential smell for header values. Names only. */
+function looksLikeCredential(name: string, value: string): boolean {
+  if (value.length === 0 || hasPlaceholder(value)) return false
+  if (SECRET_VALUE_SHAPES.some(re => re.test(value))) return true
+  return SECRET_HEADER_NAMES.test(name)
+}
+
+async function checkMcpServerConfig(
+  target: McpCheckTarget,
+  declaredUserConfig: Set<string>,
+  errors: ValidationError[],
+  warnings: ValidationWarning[],
+): Promise<void> {
+  const { name, config, origin } = target
+  const field = (f: string): string => `${origin}.${name}.${f}`
+
+  switch (config.type) {
+    case undefined:
+    case 'stdio': {
+      const commandPath = field('command')
+      checkMcpStringValue(
+        config.command,
+        commandPath,
+        declaredUserConfig,
+        errors,
+        warnings,
+      )
+      if (
+        !hasPlaceholder(config.command) &&
+        !(await resolveStdioCommand(config.command))
+      ) {
+        warnings.push({
+          path: commandPath,
+          message:
+            `Command "${stripCommandQuotes(config.command)}" was not found ` +
+            `on PATH and is not an executable file. The server will fail to ` +
+            `start on machines without it.`,
+        })
+      }
+      for (const [i, arg] of (config.args ?? []).entries()) {
+        checkMcpStringValue(
+          arg,
+          field(`args[${i}]`),
+          declaredUserConfig,
+          errors,
+          warnings,
+        )
+      }
+      for (const [key, value] of Object.entries(config.env ?? {})) {
+        checkMcpStringValue(
+          value,
+          field(`env.${key}`),
+          declaredUserConfig,
+          errors,
+          warnings,
+        )
+      }
+      break
+    }
+    case 'sse':
+    case 'http':
+    case 'ws': {
+      const urlPath = field('url')
+      checkMcpStringValue(
+        config.url,
+        urlPath,
+        declaredUserConfig,
+        errors,
+        warnings,
+      )
+      checkRemoteUrl(config.url, urlPath, errors, warnings)
+      for (const [key, value] of Object.entries(config.headers ?? {})) {
+        const headerPath = field(`headers.${key}`)
+        checkMcpStringValue(
+          value,
+          headerPath,
+          declaredUserConfig,
+          errors,
+          warnings,
+        )
+        if (looksLikeCredential(key, value)) {
+          warnings.push({
+            path: headerPath,
+            message:
+              `Header '${key}' looks like a literal credential. Use a ` +
+              `\${VAR} reference instead of embedding the value.`,
+          })
+        }
+      }
+      break
+    }
+    default:
+      // sdk, sse-ide, ws-ide, claudeai-proxy: no meaningful local check.
+      break
+  }
+}
+
+/**
+ * Parse a JSON document holding MCP servers. Accepts `{mcpServers: {...}}`
+ * or a bare server map (same fallback as the loader). struct-only errors —
+ * never echoes content, which may hold secrets.
+ */
+function parseMcpServersMap(
+  content: string,
+  origin: string,
+  refLabel: string,
+  errors: ValidationError[],
+): Record<string, unknown> | undefined {
+  let parsed: unknown
+  try {
+    parsed = jsonParse(content)
+  } catch {
+    // Generic message on purpose: parse errors can echo file content, and
+    // referenced files may hold secret values.
+    errors.push({
+      path: origin,
+      message: `MCP servers file ${refLabel} is not valid JSON.`,
+    })
+    return undefined
+  }
+  const raw =
+    parsed !== null &&
+    typeof parsed === 'object' &&
+    !Array.isArray(parsed) &&
+    'mcpServers' in parsed
+      ? (parsed as Record<string, unknown>).mcpServers
+      : parsed
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    errors.push({
+      path: origin,
+      message:
+        `MCP servers file ${refLabel} must be an object mapping server ` +
+        `names to configs (or {mcpServers: {...}}).`,
+    })
+    return undefined
+  }
+  return raw as Record<string, unknown>
+}
+
+/** Shape-check each entry; invalid entries are errors naming server + cause. */
+function targetsFromServerMap(
+  raw: Record<string, unknown>,
+  origin: string,
+  refLabel: string,
+  errors: ValidationError[],
+): McpCheckTarget[] {
+  const out: McpCheckTarget[] = []
+  for (const [serverName, cfg] of Object.entries(raw)) {
+    const parsedServer = McpServerConfigSchema().safeParse(cfg)
+    if (!parsedServer.success) {
+      const issue = parsedServer.error.issues[0]
+      errors.push({
+        path: `${origin}.${serverName}`,
+        message:
+          `Invalid MCP server "${serverName}" in ${refLabel} ` +
+          `(${issue?.path.join('.') || 'config'}: ${issue?.code ?? 'invalid'}).`,
+      })
+      continue
+    }
+    out.push({ name: serverName, config: parsedServer.data, origin })
+  }
+  return out
+}
+
+/**
+ * Load and shape-check servers from a referenced JSON file.
+ * Findings never echo file contents — values may be secrets.
+ */
+async function collectMcpFileServers(
+  pluginRoot: string,
+  ref: string,
+  origin: string,
+  errors: ValidationError[],
+): Promise<McpCheckTarget[]> {
+  const filePath = path.join(pluginRoot, ref)
+  let content: string
+  try {
+    content = await readFile(filePath, { encoding: 'utf-8' })
+  } catch (e: unknown) {
+    errors.push({
+      path: origin,
+      message: isENOENT(e)
+        ? `MCP servers file not found: ${ref}. It must ship with the plugin.`
+        : `Failed to read MCP servers file ${ref}.`,
+    })
+    return []
+  }
+  const raw = parseMcpServersMap(content, origin, ref, errors)
+  if (raw === undefined) return []
+  return targetsFromServerMap(raw, origin, ref, errors)
+}
+
+/**
+ * Validate the MCP servers a plugin declares: manifest `mcpServers`
+ * (string / array / record), referenced JSON files, MCPB refs, and
+ * `.mcp.json` at the plugin root. Deterministic file/content defects are
+ * errors; everything environment-dependent is a warning.
+ */
+async function validatePluginMcpServers(
+  manifest: { mcpServers?: unknown; userConfig?: Record<string, unknown> },
+  pluginRoot: string,
+  errors: ValidationError[],
+  warnings: ValidationWarning[],
+): Promise<void> {
+  const declaredUserConfig = new Set(Object.keys(manifest.userConfig ?? {}))
+  const targets: McpCheckTarget[] = []
+
+  const handleStringSpec = async (spec: string): Promise<void> => {
+    if (isMcpbRef(spec)) {
+      const origin = `mcpServers["${spec}"]`
+      if (spec.startsWith('http://') || spec.startsWith('https://')) {
+        if (!spec.startsWith('https://')) {
+          warnings.push({
+            path: origin,
+            message: `MCP bundle URL ${redactUrlForDisplay(spec)} does not use https://.`,
+          })
+        }
+        return
+      }
+      // Local bundle path (schema guarantees ./ prefix here).
+      try {
+        await stat(path.join(pluginRoot, spec))
+      } catch (e: unknown) {
+        errors.push({
+          path: origin,
+          message: isENOENT(e)
+            ? `MCP bundle file not found: ${spec}. It must ship with the plugin.`
+            : `Failed to read MCP bundle file ${spec}.`,
+        })
+      }
+      return
+    }
+    if (spec.startsWith('http://') || spec.startsWith('https://')) return
+    targets.push(
+      ...(await collectMcpFileServers(
+        pluginRoot,
+        spec,
+        `mcpServers["${spec}"]`,
+        errors,
+      )),
+    )
+  }
+
+  const pushInlineMap = (map: Record<string, unknown>): void => {
+    for (const [serverName, cfg] of Object.entries(map)) {
+      targets.push({
+        name: serverName,
+        // Schema-validated by the manifest parse above.
+        config: cfg as McpServerConfig,
+        origin: 'mcpServers',
+      })
+    }
+  }
+
+  const spec = manifest.mcpServers
+  if (typeof spec === 'string') {
+    await handleStringSpec(spec)
+  } else if (Array.isArray(spec)) {
+    for (const item of spec) {
+      if (typeof item === 'string') {
+        await handleStringSpec(item)
+      } else if (item !== null && typeof item === 'object') {
+        pushInlineMap(item as Record<string, unknown>)
+      }
+    }
+  } else if (spec !== null && typeof spec === 'object') {
+    pushInlineMap(spec as Record<string, unknown>)
+  }
+
+  // .mcp.json at the plugin root (loader reads it first, lowest priority).
+  // Absent is fine — present-but-broken is an error.
+  try {
+    const content = await readFile(path.join(pluginRoot, '.mcp.json'), {
+      encoding: 'utf-8',
+    })
+    const raw = parseMcpServersMap(content, '.mcp.json', '.mcp.json', errors)
+    if (raw !== undefined) {
+      targets.push(...targetsFromServerMap(raw, '.mcp.json', '.mcp.json', errors))
+    }
+  } catch (e: unknown) {
+    if (!isENOENT(e)) {
+      errors.push({
+        path: '.mcp.json',
+        message: 'Failed to read MCP servers file .mcp.json.',
+      })
+    }
+  }
+
+  for (const target of targets) {
+    await checkMcpServerConfig(target, declaredUserConfig, errors, warnings)
   }
 }
 
