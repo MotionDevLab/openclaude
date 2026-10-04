@@ -6,6 +6,7 @@ import {
   getCustomLaneDefaultModel,
   getCustomProviderLabel,
   getCustomProviderLimits,
+  getCustomProvidersFromSettings,
   getCustomProviderSmallModel,
   isAllowedCustomProviderBaseUrl,
   isCustomLaneActive,
@@ -364,6 +365,26 @@ describe('settings-backed lookup', () => {
       fresh.getCustomProviderLabel('http://127.0.0.1:8080/v1', 'example-model'),
     ).toBe('Example Gateway')
     activeCustomProvidersOverride = null
+  })
+
+  test('drops lanes whose baseUrl fails the allowlist', () => {
+    activeCustomProvidersOverride = [
+      EXAMPLE_ENTRY,
+      OR_ENTRY,
+      {
+        ...EXAMPLE_ENTRY,
+        id: 'plain-http',
+        baseUrl: 'http://example.com/v1',
+      },
+    ]
+    try {
+      expect(getCustomProvidersFromSettings().map(e => e.id)).toEqual([
+        'example-lane',
+        'openrouter-direct',
+      ])
+    } finally {
+      activeCustomProvidersOverride = null
+    }
   })
 })
 
