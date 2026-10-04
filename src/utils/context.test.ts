@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, mock, spyOn, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test'
 import { acquireSharedMutationLock, releaseSharedMutationLock } from '../test/sharedMutationLock.js'
 
 import { getMaxOutputTokensForModel } from '../services/api/claude.ts'
@@ -1270,4 +1270,29 @@ test('clearSessionContextWindowOverride resets state for session isolation', () 
   clearSessionContextWindowOverride()
   expect(getSessionContextWindowOverride('gpt-4o')).toBeUndefined()
   expect(getContextWindowForModel('gpt-4o')).not.toBe(256_000)
+})
+
+describe('fallback warning is actionable for any model', () => {
+  test('warns with modelLimits + env + lane + set-context-window keys', async () => {
+    process.env.CLAUDE_CODE_USE_OPENAI = '1'
+    delete process.env.OPENAI_MODEL
+
+    const actualDebugModule = await import('./debug.js')
+    const logSpy = spyOn(actualDebugModule, 'logForDebugging').mockImplementation(
+      (_message: string, _options?: { level: 'verbose' | 'debug' | 'info' | 'warn' | 'error' }) => {},
+    )
+    try {
+      const contextModule = await import(
+        `./context.ts?warnkeys=${Date.now()}-${Math.random()}`
+      )
+      contextModule.getContextWindowForModel('some-brand-new-model-9.9-test-only')
+      const joined = logSpy.mock.calls.map(([msg]) => String(msg)).join('\n')
+      expect(joined).toContain('modelLimits')
+      expect(joined).toContain('CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS')
+      expect(joined).toContain('customProviders')
+      expect(joined).toContain('/set-context-window')
+    } finally {
+      mock.restore()
+    }
+  })
 })

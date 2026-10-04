@@ -215,7 +215,11 @@ function warnUnknownIntegrationRuntimeLimits(model: string): void {
   logForDebugging(
     `[context] Warning: model "${model}" not in integration model metadata for route "${routeId}" — ` +
       `using fallback ${OPENAI_FALLBACK_CONTEXT_WINDOW} token context window. ` +
-      'Add it to src/integrations/models for accurate compaction.',
+      `Fix (any one, model-agnostic): settings.json modelLimits {"${model}": {"contextWindow": N}}, ` +
+      `or env CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS '{"${model}": N}' (prefix "muse-spark" covers family), ` +
+      `or customProviders lane {"contextWindow": N}, ` +
+      `or session-only /set-context-window ${model} N. ` +
+      `Add it to src/integrations/models for accurate compaction.`,
     { level: 'warn' },
   )
 }
