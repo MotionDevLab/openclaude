@@ -61,6 +61,12 @@ export type CompactMetadata = {
   preTokens: number
   userContext?: string
   messagesSummarized?: number
+  /**
+   * Why a forced auto-compaction bypassed the token threshold. Absent when
+   * the token threshold fired (or for manual compacts) — recorded so a
+   * later audit can tell a threshold trip apart from a forced one.
+   */
+  forceReason?: 'memory-pressure' | 'message-count' | 'context-overflow'
   preservedSegment?: {
     headUuid: UUID
     anchorUuid: UUID

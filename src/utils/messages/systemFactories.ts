@@ -206,6 +206,7 @@ export function createCompactBoundaryMessage(
   lastPreCompactMessageUuid?: UUID,
   userContext?: string,
   messagesSummarized?: number,
+  forceReason?: 'memory-pressure' | 'message-count' | 'context-overflow',
 ): SystemCompactBoundaryMessage {
   return {
     type: 'system',
@@ -220,6 +221,7 @@ export function createCompactBoundaryMessage(
       preTokens,
       userContext,
       messagesSummarized,
+      ...(forceReason !== undefined && { forceReason }),
     },
     ...(lastPreCompactMessageUuid && {
       logicalParentUuid: lastPreCompactMessageUuid,

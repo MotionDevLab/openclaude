@@ -532,6 +532,7 @@ export async function autoCompactIfNeeded(
     messages,
     toolUseContext.agentId,
     recompactionInfo.autoCompactThreshold,
+    forcedBy,
   )
   if (sessionMemoryResult) {
     // Reset lastSummarizedMessageId since session memory compaction prunes messages
@@ -562,6 +563,7 @@ export async function autoCompactIfNeeded(
       undefined, // No custom instructions for autocompact
       true, // isAutoCompact
       recompactionInfo,
+      forcedBy,
     )
 
     // Reset lastSummarizedMessageId since legacy compaction replaces all messages
