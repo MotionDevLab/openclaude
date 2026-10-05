@@ -1086,21 +1086,46 @@ describe('generateCommandSuggestions argumentHint discovery', () => {
     name,
     description,
     argumentHint,
+    subcommands,
   }: {
     name: string
     description: string
     argumentHint?: string
+    subcommands?: Command['subcommands']
   }): Command {
     return {
       type: 'local-jsx',
       name,
       description,
       ...(argumentHint !== undefined ? { argumentHint } : {}),
+      ...(subcommands !== undefined ? { subcommands } : {}),
       isHidden: false,
       progressMessage: 'running',
       contentLength: 0,
       getPromptForCommand: async () => [],
     } as unknown as Command
+  }
+
+  function doctorWithSubcommands(): Command {
+    return localCommand({
+      name: 'doctor',
+      description: 'Diagnose and verify your OpenClaude installation',
+      argumentHint:
+        'report [--json|--markdown] [--out file] [--include-debug] | prompt-audit [path?]',
+      subcommands: [
+        {
+          name: 'report',
+          description: 'Diagnose installation and settings',
+          argumentHint: '[--json|--markdown] [--out file] [--include-debug]',
+        },
+        {
+          name: 'prompt-audit',
+          description:
+            'Audit prompts/loader files, or walk a directory for stale refs and legacy patterns',
+          argumentHint: '[path?]',
+        },
+      ],
+    })
   }
 
   test('doctor row contains prompt-audit via argumentHint', () => {
@@ -1236,5 +1261,180 @@ describe('generateCommandSuggestions argumentHint discovery', () => {
       )
       expect(names).toContain('/doctor')
     }
+  })
+})
+
+describe('generateCommandSuggestions subcommands', () => {
+  function localCommand({
+    name,
+    description,
+    argumentHint,
+    subcommands,
+  }: {
+    name: string
+    description: string
+    argumentHint?: string
+    subcommands?: Command['subcommands']
+  }): Command {
+    return {
+      type: 'local-jsx',
+      name,
+      description,
+      ...(argumentHint !== undefined ? { argumentHint } : {}),
+      ...(subcommands !== undefined ? { subcommands } : {}),
+      isHidden: false,
+      progressMessage: 'running',
+      contentLength: 0,
+      getPromptForCommand: async () => [],
+    } as unknown as Command
+  }
+
+  function doctorWithSubcommands(): Command {
+    return localCommand({
+      name: 'doctor',
+      description: 'Diagnose and verify your OpenClaude installation',
+      argumentHint:
+        'report [--json|--markdown] [--out file] [--include-debug] | prompt-audit [path?]',
+      subcommands: [
+        {
+          name: 'report',
+          description: 'Diagnose installation and settings',
+          argumentHint: '[--json|--markdown] [--out file] [--include-debug]',
+        },
+        {
+          name: 'prompt-audit',
+          description:
+            'Audit prompts/loader files, or walk a directory for stale refs and legacy patterns',
+          argumentHint: '[path?]',
+        },
+      ],
+    })
+  }
+
+  test('/doctor with trailing space suggests both subcommands', () => {
+    const commands = [
+      doctorWithSubcommands(),
+      localCommand({ name: 'model', description: 'Change model' }),
+    ]
+
+    const results = generateCommandSuggestions('/doctor ', commands)
+
+    expect(results.map(item => item.displayText).sort()).toEqual(
+      ['/doctor prompt-audit', '/doctor report'].sort(),
+    )
+  })
+
+  test('/doctor prefix filters subcommands', () => {
+    const commands = [doctorWithSubcommands()]
+
+    const names = generateCommandSuggestions('/doctor pr', commands).map(
+      item => item.displayText,
+    )
+
+    expect(names).toEqual(['/doctor prompt-audit'])
+  })
+
+  test('/doctor re prefix filters to report only', () => {
+    const commands = [doctorWithSubcommands()]
+
+    const names = generateCommandSuggestions('/doctor re', commands).map(
+      item => item.displayText,
+    )
+
+    expect(names).toEqual(['/doctor report'])
+  })
+
+  test('command without subcommands keeps unchanged behavior on trailing space', () => {
+    const commands = [
+      localCommand({ name: 'model', description: 'Change model' }),
+    ]
+
+    // No subcommands: '/model ' must not invent subcommand rows.
+    const results = generateCommandSuggestions('/model ', commands)
+
+    expect(results.map(item => item.displayText)).toEqual(['/model'])
+  })
+
+  test('bare slash list keeps one row per command', () => {
+    const commands = [
+      doctorWithSubcommands(),
+      localCommand({ name: 'model', description: 'Change model' }),
+    ]
+
+    const names = generateCommandSuggestions('/', commands).map(
+      item => item.displayText,
+    )
+
+    expect(names).toContain('/doctor')
+    expect(names).toContain('/model')
+    expect(names).not.toContain('/doctor report')
+    expect(names).not.toContain('/doctor prompt-audit')
+  })
+
+  test('subcommand items have unique stable ids', () => {
+    const commands = [doctorWithSubcommands()]
+
+    const results = generateCommandSuggestions('/doctor ', commands)
+    const ids = results.map(item => item.id)
+
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(ids).toContain('doctor:local-jsx:sub:prompt-audit')
+    expect(ids).toContain('doctor:local-jsx:sub:report')
+  })
+
+  test('selecting a subcommand fills the input and never executes', () => {
+    const commands = [doctorWithSubcommands()]
+    const results = generateCommandSuggestions('/doctor ', commands)
+    const promptAudit = results.find(
+      item => item.displayText === '/doctor prompt-audit',
+    )
+
+    expect(promptAudit).toBeDefined()
+
+    let filledValue: string | undefined
+    let submitted = false
+    applyCommandSuggestion(
+      promptAudit!,
+      true,
+      commands,
+      value => {
+        filledValue = value
+      },
+      () => {},
+      value => {
+        submitted = true
+        filledValue = value
+      },
+    )
+
+    expect(filledValue).toBe('/doctor prompt-audit ')
+    expect(submitted).toBe(false)
+  })
+
+  test('/doctor prompt-audit still resolves to the doctor command by first token', () => {
+    const commands = [doctorWithSubcommands()]
+
+    const match = getBestCommandMatch('doct', commands)
+
+    expect(match?.fullCommand).toBe('doctor')
+  })
+
+  test('a parent command id containing :sub: mid-string is not a subcommand fill', async () => {
+    const { isSubcommandSuggestion } = await import('./commandSuggestions.js')
+
+    expect(
+      isSubcommandSuggestion({
+        id: 'x:sub:y:builtin',
+        displayText: '/x:sub:y',
+        description: 'not a subcommand',
+      }),
+    ).toBe(false)
+    expect(
+      isSubcommandSuggestion({
+        id: 'doctor:local-jsx:sub:report',
+        displayText: '/doctor report',
+        description: 'a subcommand',
+      }),
+    ).toBe(true)
   })
 })

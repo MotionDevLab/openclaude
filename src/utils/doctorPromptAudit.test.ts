@@ -1,12 +1,15 @@
 import { describe, expect, test } from 'bun:test'
 import {
   collectFailedFiles,
+  collectPromptAuditFilesFromDir,
   findDuplicateParagraphs,
   findLegacyPatterns,
   findStaleCommandRefs,
   findStaleFilePaths,
   isRepoShapedRef,
   LEGACY_PROMPT_PATTERNS,
+  PROMPT_AUDIT_DIR_MAX_DEPTH,
+  PROMPT_AUDIT_DIR_MAX_FILES,
   renderPromptAuditReport,
   type PromptAuditFile,
   type PromptAuditFs,
@@ -312,5 +315,184 @@ describe('renderPromptAuditReport', () => {
     const itemLines = section.split('\n').filter(line => line.startsWith('  - '))
     expect(itemLines).toHaveLength(20)
     expect(section).toContain('+ 5 more')
+  })
+
+  test('empty scan renders an honest empty message, never "no issues found"', () => {
+    const report = renderPromptAuditReport(emptyResult({ filesScanned: 0 }), 'docs')
+
+    expect(report).toContain('no prompt files found')
+    expect(report).toContain('"docs"')
+    expect(report).toContain('Nothing was audited')
+    expect(report).not.toContain('no issues found')
+  })
+
+  test('truncated walk appends an overflow note with the file cap', () => {
+    const report = renderPromptAuditReport(
+      emptyResult({ filesScanned: PROMPT_AUDIT_DIR_MAX_FILES, truncated: true }),
+      'docs',
+    )
+
+    expect(report).toContain(`${PROMPT_AUDIT_DIR_MAX_FILES}`)
+  })
+})
+
+function dirEntry(
+  name: string,
+  kind: 'file' | 'dir' | 'symlink-dir' = 'file',
+): { name: string; isDirectory: () => boolean; isFile: () => boolean; isSymbolicLink: () => boolean } {
+  return {
+    name,
+    isDirectory: () => kind === 'dir' || kind === 'symlink-dir',
+    isFile: () => kind === 'file',
+    isSymbolicLink: () => kind === 'symlink-dir',
+  }
+}
+
+function fakeDirFs(tree: Record<string, Array<{ name: string; kind?: 'file' | 'dir' | 'symlink-dir' }>>, contents: Record<string, string>, unreadable: string[] = []): PromptAuditFs {
+  return {
+    existsSync: () => true,
+    readdir: async (dir: string) => {
+      const entries = tree[dir.replace(/\\/g, '/')]
+      if (!entries) throw new Error(`ENOENT: ${dir}`)
+      return entries.map(e => dirEntry(e.name, e.kind ?? 'file'))
+    },
+    readFile: async (path: string) => {
+      const key = path.replace(/\\/g, '/')
+      if (unreadable.includes(key)) throw new Error('EACCES: permission denied')
+      const content = contents[key]
+      if (content === undefined) throw new Error(`ENOENT: ${path}`)
+      return content
+    },
+  }
+}
+
+describe('collectPromptAuditFilesFromDir', () => {
+  test('finds nested .md files case-insensitively and ignores non-md', async () => {
+    const fs = fakeDirFs(
+      {
+        '/root': [
+          { name: 'a.md', kind: 'file' },
+          { name: 'b.MD', kind: 'file' },
+          { name: 'notes.txt', kind: 'file' },
+          { name: 'sub', kind: 'dir' },
+        ],
+        '/root/sub': [{ name: 'c.Markdown', kind: 'file' }, { name: 'd.md', kind: 'file' }],
+      },
+      {
+        '/root/a.md': '# A',
+        '/root/b.MD': '# B',
+        '/root/sub/c.Markdown': '# C (not .md, ignored)',
+        '/root/sub/d.md': '# D',
+      },
+    )
+
+    const collected = await collectPromptAuditFilesFromDir('/root', fs)
+    const paths = collected.files.map(f => f.path.replace(/\\/g, '/')).sort()
+
+    expect(paths).toEqual(['/root/a.md', '/root/b.MD', '/root/sub/d.md'])
+    for (const entry of collected.files) {
+      expect(entry.source).toBe('dir')
+    }
+    expect(collected.failedFiles).toEqual([])
+    expect(collected.truncated).toBe(false)
+  })
+
+  test('skips hidden dirs, node_modules, and .git', async () => {
+    const fs = fakeDirFs(
+      {
+        '/root': [
+          { name: 'keep.md', kind: 'file' },
+          { name: '.hidden', kind: 'dir' },
+          { name: 'node_modules', kind: 'dir' },
+          { name: '.git', kind: 'dir' },
+        ],
+        '/root/.hidden': [{ name: 'secret.md', kind: 'file' }],
+        '/root/node_modules': [{ name: 'pkg.md', kind: 'file' }],
+        '/root/.git': [{ name: 'objects.md', kind: 'file' }],
+      },
+      { '/root/keep.md': '# keep' },
+    )
+
+    const collected = await collectPromptAuditFilesFromDir('/root', fs)
+
+    expect(collected.files.map(f => f.path.replace(/\\/g, '/'))).toEqual(['/root/keep.md'])
+  })
+
+  test('records unreadable files as failedFiles instead of throwing', async () => {
+    const fs = fakeDirFs(
+      { '/root': [{ name: 'good.md', kind: 'file' }, { name: 'bad.md', kind: 'file' }] },
+      { '/root/good.md': '# ok' },
+      ['/root/bad.md'],
+    )
+
+    const collected = await collectPromptAuditFilesFromDir('/root', fs)
+
+    expect(collected.files.map(f => f.path.replace(/\\/g, '/'))).toEqual(['/root/good.md'])
+    expect(collected.failedFiles).toHaveLength(1)
+    expect(collected.failedFiles[0]?.path.replace(/\\/g, '/')).toBe('/root/bad.md')
+    expect(collected.failedFiles[0]?.reason.length ?? 0).toBeGreaterThan(0)
+  })
+
+  test('honors the named file cap and marks the walk truncated', async () => {
+    const names = Array.from({ length: PROMPT_AUDIT_DIR_MAX_FILES + 5 }, (_, i) => ({
+      name: `f${i}.md`,
+      kind: 'file' as const,
+    }))
+    const contents: Record<string, string> = {}
+    for (const entry of names) contents[`/root/${entry.name}`] = '# x'
+    const fs = fakeDirFs({ '/root': names }, contents)
+
+    const collected = await collectPromptAuditFilesFromDir('/root', fs)
+
+    expect(collected.files).toHaveLength(PROMPT_AUDIT_DIR_MAX_FILES)
+    expect(collected.truncated).toBe(true)
+  })
+
+  test('does not follow symlinked dirs so cycles terminate', async () => {
+    const fs = fakeDirFs(
+      {
+        '/root': [
+          { name: 'top.md', kind: 'file' },
+          { name: 'loop', kind: 'symlink-dir' },
+        ],
+        '/root/loop': [
+          { name: 'inner.md', kind: 'file' },
+          { name: 'loop', kind: 'symlink-dir' },
+        ],
+      },
+      { '/root/top.md': '# top', '/root/loop/inner.md': '# inner' },
+    )
+
+    const collected = await collectPromptAuditFilesFromDir('/root', fs)
+
+    expect(collected.files.length).toBeLessThanOrEqual(PROMPT_AUDIT_DIR_MAX_FILES)
+    expect(collected.files.map(f => f.path.replace(/\\/g, '/'))).toContain('/root/top.md')
+  })
+
+  test('stops descending beyond the max depth', async () => {
+    const tree: Record<string, Array<{ name: string; kind?: 'file' | 'dir' | 'symlink-dir' }>> = {}
+    const contents: Record<string, string> = { '/root/top.md': '# top' }
+    tree['/root'] = [{ name: 'top.md', kind: 'file' }]
+    let dir = '/root'
+    for (let i = 0; i <= PROMPT_AUDIT_DIR_MAX_DEPTH + 5; i++) {
+      const child = `d${i}`
+      tree[dir]?.push({ name: child, kind: 'dir' })
+      dir = `${dir}/${child}`
+      tree[dir] = []
+      if (i === 5) {
+        tree[dir]?.push({ name: 'shallow.md', kind: 'file' })
+        contents[`${dir}/shallow.md`] = '# shallow'
+      }
+    }
+    tree[dir]?.push({ name: 'deep.md', kind: 'file' })
+    contents[`${dir}/deep.md`] = '# deep'
+    const fs = fakeDirFs(tree, contents)
+
+    const collected = await collectPromptAuditFilesFromDir('/root', fs)
+    const paths = collected.files.map(f => f.path.replace(/\\/g, '/'))
+
+    expect(paths).toContain('/root/top.md')
+    expect(paths).toContain('/root/d0/d1/d2/d3/d4/d5/shallow.md')
+    expect(paths).not.toContain(`${dir}/deep.md`)
   })
 })

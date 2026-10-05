@@ -4,7 +4,7 @@ import { useMemo } from 'react';
 import { type Command, formatDescriptionWithSource } from '../../commands.js';
 import { Box, Text } from '../../ink.js';
 import { truncate } from '../../utils/format.js';
-import { safeArgumentHint } from '../../utils/suggestions/commandSuggestions.js';
+import { safeArgumentHint, safeSubcommands } from '../../utils/suggestions/commandSuggestions.js';
 import { Select } from '../CustomSelect/select.js';
 import { useTabHeaderFocus } from '../design-system/Tabs.js';
 type Props = {
@@ -37,12 +37,28 @@ export function Commands(t0) {
     let t2;
     if ($[3] !== maxWidth) {
       t2 = cmd_0 => {
+        const subs = safeSubcommands(cmd_0);
+        if (subs) {
+          const parent = {
+            label: `/${cmd_0.name}`,
+            value: cmd_0.name,
+            description: truncate(formatDescriptionWithSource(cmd_0) + ` — ${subs.length} subcommands ▸`, maxWidth, true)
+          };
+          const children = subs.map(sub_0 => {
+            return {
+              label: `/${cmd_0.name} ${sub_0.name}${sub_0.argumentHint ? ` ${sub_0.argumentHint}` : ''}`,
+              value: `${cmd_0.name} ${sub_0.name}`,
+              description: truncate(sub_0.description, maxWidth, true)
+            };
+          });
+          return [parent, ...children];
+        }
         const hint = safeArgumentHint(cmd_0);
-        return {
+        return [{
           label: `/${cmd_0.name}`,
           value: cmd_0.name,
           description: truncate(formatDescriptionWithSource(cmd_0) + (hint ? ` — ${hint}` : ''), maxWidth, true)
-        };
+        }];
       };
       $[3] = maxWidth;
       $[4] = t2;
@@ -55,7 +71,7 @@ export function Commands(t0) {
       }
       seen.add(cmd.name);
       return true;
-    }).sort(_temp).map(t2);
+    }).sort(_temp).flatMap(t2);
     $[0] = commands;
     $[1] = maxWidth;
     $[2] = t1;
