@@ -79,6 +79,26 @@ export function safeArgumentHint(command: Command): string | undefined {
 }
 
 /**
+ * Read a command's `subcommands` without letting a throw propagate.
+ * Returns undefined when subcommands can't be resolved or the list is
+ * empty, so callers fall back to the legacy single-row behavior.
+ */
+export function safeSubcommands(
+  command: Command,
+): Command['subcommands'] | undefined {
+  try {
+    const subs = command.subcommands
+    if (!subs || subs.length === 0) {
+      return undefined
+    }
+    return subs
+  } catch (err) {
+    warnBrokenCommand(safeCommandName(command) ?? 'unknown', err)
+    return undefined
+  }
+}
+
+/**
  * Check whether a lowercased query occurs in a lowercased hint at a token
  * boundary — the match starts the hint or follows a non-alphanumeric
  * character. Keeps subcommand discovery ("prompt-audit", "--out") while a
@@ -514,6 +534,101 @@ function createCommandSuggestionItemFromSnapshot(
   )
 }
 
+/**
+ * Deterministic unique ID for a subcommand suggestion.
+ * Parent IDs (`doctor:local-jsx`) collide across children, so subcommand
+ * items get their own scheme to avoid unstable numeric suffixes from
+ * `ensureUniqueSuggestionIds`.
+ */
+export function getSubcommandId(
+  cmd: Command,
+  subName: string,
+  commandName = getCommandName(cmd),
+): string {
+  return `${getCommandId(cmd, commandName)}:sub:${subName}`
+}
+
+/**
+ * Creates a suggestion item for one subcommand (`/doctor report`).
+ * Display-only fill semantics: selecting it fills the input, never executes.
+ */
+function createSubcommandSuggestionItem(
+  cmd: Command,
+  commandName: string,
+  sub: NonNullable<Command['subcommands']>[number],
+): SuggestionItem {
+  return {
+    id: getSubcommandId(cmd, sub.name, commandName),
+    displayText: `/${commandName} ${sub.name}`,
+    description:
+      sub.description + (sub.argumentHint ? ` — ${sub.argumentHint}` : ''),
+    metadata: cmd,
+  }
+}
+
+/**
+ * Subcommand branch for `generateCommandSuggestions`.
+ * When input is `/cmd partial` and `cmd` declares `subcommands`, return
+ * subcommand items filtered by prefix instead of `[]`.
+ * Returns undefined when this input is not a subcommand query so callers
+ * fall through to the legacy behavior (fully backward compatible).
+ */
+function getSubcommandSuggestions(
+  input: string,
+  commands: Command[],
+): SuggestionItem[] | undefined {
+  const spaceIndex = input.indexOf(' ')
+  if (spaceIndex === -1) {
+    return undefined
+  }
+  const cmdName = input.slice(1, spaceIndex).toLowerCase()
+  if (!cmdName) {
+    return undefined
+  }
+  let parent: Command | undefined
+  let parentName: string | undefined
+  for (const cmd of commands) {
+    const name = safeCommandName(cmd)
+    if (name === null) {
+      continue
+    }
+    if (name.toLowerCase() === cmdName) {
+      parent = cmd
+      parentName = name
+      break
+    }
+  }
+  if (!parent || !parentName) {
+    return undefined
+  }
+  const subs = safeSubcommands(parent)
+  if (!subs) {
+    return undefined
+  }
+  const afterCmd = input.slice(spaceIndex + 1)
+  // Subcommand already fully typed plus args (e.g. `/doctor report --json`)
+  // or a second space-separated token — no further completion.
+  if (afterCmd.includes(' ')) {
+    return []
+  }
+  const partial = afterCmd.toLowerCase()
+  const filtered = subs.filter(sub =>
+    sub.name.toLowerCase().startsWith(partial),
+  )
+  return ensureUniqueSuggestionIds(
+    filtered.map(sub =>
+      createSubcommandSuggestionItem(parent, parentName, sub),
+    ),
+  )
+}
+
+/** True when a suggestion item is a subcommand fill (never execute). */
+export function isSubcommandSuggestion(item: SuggestionItem): boolean {
+  // Suffix-anchored: a parent command named e.g. `x:sub:y` contains `:sub:`
+  // mid-id but never ends with it; subcommand ids always end `:sub:<name>`.
+  return /:sub:[^:]+$/.test(item.id)
+}
+
 function getRenderedCommandDescription(cmd: Command): string {
   // Command descriptions can be dynamic getters that read live state and may
   // throw (e.g. a backend returning null). This runs for every command while
@@ -569,6 +684,14 @@ export function generateCommandSuggestions(
   // Only process command input
   if (!isCommandInput(input)) {
     return []
+  }
+
+  // Subcommand branch: `/cmd partial` with structured subcommands.
+  // Must run before the hasCommandArgs early-return, which would otherwise
+  // kill second-token completion. Falls through when not applicable.
+  const subcommandSuggestions = getSubcommandSuggestions(input, commands)
+  if (subcommandSuggestions !== undefined) {
+    return subcommandSuggestions
   }
 
   // If there are arguments, don't show suggestions
@@ -840,6 +963,16 @@ export function applyCommandSuggestion(
     slashCommandOverride?: Command,
   ) => void,
 ): void {
+  // Subcommand items fill the input and never execute, even on Enter.
+  // The displayText already carries the full `/cmd sub` form.
+  if (typeof suggestion !== 'string' && isSubcommandSuggestion(suggestion)) {
+    const filled =
+      suggestion.displayText + (suggestion.displayText.endsWith(' ') ? '' : ' ')
+    onInputChange(filled)
+    setCursorOffset(filled.length)
+    return
+  }
+
   // Extract command name and object from string or SuggestionItem metadata
   let commandName: string
   let commandObj: Command | undefined

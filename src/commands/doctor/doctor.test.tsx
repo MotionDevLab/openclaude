@@ -251,4 +251,20 @@ describe('/doctor prompt-audit', () => {
     expect(isValidElement(result)).toBe(true)
     expect(runPromptAudit).not.toHaveBeenCalled()
   })
+
+  test('parses subcommands case-insensitively as advertised in help', async () => {
+    const runPromptAudit = mock(async () => '# prompt audit')
+    const call = createDoctorCommandCall(reportDependencies(), {
+      runPromptAudit,
+    })
+    const onDone = mock(() => {})
+
+    const result = await call(onDone as never, {} as never, 'PROMPT-AUDIT rules')
+
+    expect(result).toBeNull()
+    expect(runPromptAudit).toHaveBeenCalledWith(process.cwd(), 'rules')
+    expect(onDone).toHaveBeenCalledWith('# prompt audit', {
+      display: 'system',
+    })
+  })
 })

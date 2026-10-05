@@ -194,6 +194,12 @@ export type CommandAvailability =
   // Console API key user (direct api.anthropic.com, not via claude.ai OAuth)
   | 'console'
 
+export type CommandSubcommand = {
+  name: string
+  description: string
+  argumentHint?: string
+}
+
 export type CommandBase = {
   availability?: CommandAvailability[]
   description: string
@@ -207,6 +213,7 @@ export type CommandBase = {
   aliases?: string[]
   isMcp?: boolean
   argumentHint?: string // Hint text for command arguments (displayed in gray after command)
+  subcommands?: CommandSubcommand[] // Structured subcommands for help + autocomplete (opt-in, backward compatible)
   whenToUse?: string // From the "Skill" spec. Detailed usage scenarios for when to use this command
   whenToUseLocalizationKey?: LocalizationKey
   version?: string // Version of the command/skill

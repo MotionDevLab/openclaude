@@ -30,7 +30,8 @@ import {
   getBestCommandMatch,
   getCommandSuggestionForEnter,
   getCommandSuggestionsMaxWidth,
-  isCommandInput
+  isCommandInput,
+  isSubcommandSuggestion
 } from '../utils/suggestions/commandSuggestions.js';
 import { getDirectoryCompletions, getPathCompletions, isPathLikeToken } from '../utils/suggestions/directoryCompletion.js';
 import { getShellHistoryCompletion } from '../utils/suggestions/shellHistoryCompletion.js';
@@ -712,6 +713,31 @@ export function useTypeahead({
         // No suggestions found - clear and return
         clearSuggestions();
         return;
+      }
+    }
+
+    // Subcommand completion (`/cmd partial`): must run before the
+    // hasCommandWithArguments gate below, which treats a partial second
+    // token (e.g. `/doctor pr`) as command arguments and would otherwise
+    // skip command suggestions entirely. Only when the cursor is at the end;
+    // mid-input edits fall through to the legacy paths. Non-subcommand
+    // inputs fall through unchanged.
+    if (
+      mode === 'prompt' &&
+      isCommandInput(value) &&
+      effectiveCursorOffset > 0 &&
+      effectiveCursorOffset === value.length
+    ) {
+      const subItems = generateCommandSuggestions(value, commands)
+      if (subItems.length > 0 && subItems.every(isSubcommandSuggestion)) {
+        setSuggestionsState(() => ({
+          commandArgumentHint: undefined,
+          suggestions: subItems,
+          selectedSuggestion: 0,
+        }))
+        setSuggestionType('command')
+        setMaxColumnWidth(allCommandsMaxWidth)
+        return
       }
     }
 
