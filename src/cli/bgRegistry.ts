@@ -55,6 +55,10 @@ export type BackgroundSession = {
   status: BackgroundSessionStatus
   provider?: string
   model?: string
+  /** Opt-in `--bg --worktree` isolation: path/branch/slug of the job worktree. Absent = non-worktree session. */
+  worktreePath?: string
+  worktreeBranch?: string
+  worktreeName?: string
   sessionId: string
   processMarker?: string
   terminalFactGeneration?: string
@@ -98,6 +102,9 @@ export type CreateBackgroundSessionInput = {
   command: string[]
   provider?: string
   model?: string
+  worktreePath?: string
+  worktreeBranch?: string
+  worktreeName?: string
   sessionId: string
   processMarker?: string
   now?: Date
@@ -1275,6 +1282,12 @@ function isBackgroundSession(
     (candidate.provider === undefined ||
       typeof candidate.provider === 'string') &&
     (candidate.model === undefined || typeof candidate.model === 'string') &&
+    (candidate.worktreePath === undefined ||
+      typeof candidate.worktreePath === 'string') &&
+    (candidate.worktreeBranch === undefined ||
+      typeof candidate.worktreeBranch === 'string') &&
+    (candidate.worktreeName === undefined ||
+      typeof candidate.worktreeName === 'string') &&
     typeof candidate.sessionId === 'string' &&
     (candidate.processMarker === undefined ||
       isValidBackgroundProcessMarker(candidate.processMarker)) &&
@@ -2486,6 +2499,9 @@ export async function createBackgroundSession(
     status: 'running',
     ...(input.provider ? { provider: input.provider } : {}),
     ...(input.model ? { model: input.model } : {}),
+    ...(input.worktreePath ? { worktreePath: input.worktreePath } : {}),
+    ...(input.worktreeBranch ? { worktreeBranch: input.worktreeBranch } : {}),
+    ...(input.worktreeName ? { worktreeName: input.worktreeName } : {}),
     sessionId: input.sessionId,
     ...(input.processMarker
       ? { processMarker: input.processMarker }

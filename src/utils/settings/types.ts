@@ -670,7 +670,9 @@ export const SettingsSchema = lazySchema(() =>
             .describe('Deprecated alias for autoConfigureLongPaths.'),
         }))
         .optional()
-        .describe('Git worktree configuration for --worktree flag.'),
+        .describe(
+          'Git worktree configuration for the -w/--worktree session flag and opt-in --bg --worktree background jobs.',
+        ),
       // Whether to disable all hooks and statusLine
       disableAllHooks: z
         .boolean()

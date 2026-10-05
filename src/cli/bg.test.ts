@@ -18,6 +18,7 @@ import {
   parseLogsInvocation,
   resolveBackgroundSessionModel,
   resolveBackgroundSessionProvider,
+  resolveBackgroundWorktreeSlug,
 } from './bg.js'
 import {
   BACKGROUND_SESSION_ID_ENV,
@@ -28,6 +29,11 @@ import {
   backgroundProcessMarkerToken,
   generateBackgroundProcessMarker,
 } from './bgRouting.js'
+import {
+  _setBackgroundSessionsRootForTesting,
+  createBackgroundSession,
+  listBackgroundSessions,
+} from './bgRegistry.js'
 import type {
   BackgroundSession,
   BackgroundSessionProcessIdentity,
@@ -572,6 +578,95 @@ describe('background session CLI parsing', () => {
 
     expect(parsed.prompt).toBe('--bg')
     expect(parsed.childArgs).toEqual(['--print', '--', '--bg'])
+  })
+
+  it('parses --worktree/--keep-worktree before -- and strips them from child args', () => {
+    const parsed = parseBackgroundInvocation([
+      '--bg',
+      '--worktree',
+      '--keep-worktree',
+      '--name',
+      'demo',
+      'do the work',
+    ])
+
+    expect(parsed.worktree).toBe(true)
+    expect(parsed.keepWorktree).toBe(true)
+    expect(parsed.name).toBe('demo')
+    expect(parsed.prompt).toBe('do the work')
+    expect(parsed.childArgs).toEqual([
+      '--name',
+      'demo',
+      '--print',
+      'do the work',
+    ])
+  })
+
+  it('treats --worktree after -- as prompt text, not a job flag', () => {
+    const parsed = parseBackgroundInvocation(['--bg', '--', '--worktree'])
+
+    expect(parsed.worktree).toBeUndefined()
+    expect(parsed.prompt).toBe('--worktree')
+    expect(parsed.childArgs).toEqual(['--print', '--', '--worktree'])
+  })
+
+  it('derives the worktree slug from --name, falling back to the bg id', () => {
+    expect(resolveBackgroundWorktreeSlug('demo', 'bg-12345678')).toBe('demo')
+    expect(resolveBackgroundWorktreeSlug(undefined, 'bg-12345678')).toBe(
+      'bg-12345678',
+    )
+  })
+
+  it('rejects unsafe worktree slugs with the shared validator message', () => {
+    expect(() =>
+      resolveBackgroundWorktreeSlug('../../../x', 'bg-12345678'),
+    ).toThrow('Invalid worktree name')
+  })
+
+  it('round-trips worktree fields through the registry; absent means non-worktree', async () => {
+    const configDir = await mkdtemp(join(tmpdir(), 'openclaude-bg-worktree-'))
+    _setBackgroundSessionsRootForTesting(join(configDir, 'bg-sessions'))
+    try {
+      const worktreeCwd = join(configDir, 'wt')
+      const withWorktree = await createBackgroundSession({
+        id: 'bg-worktree-1',
+        name: 'demo',
+        pid: 4242,
+        cwd: worktreeCwd,
+        command: ['openclaude', '--print', 'do the work'],
+        sessionId: 'conversation-wt',
+        worktreePath: worktreeCwd,
+        worktreeBranch: 'openclaude/bg-worktree-1',
+        worktreeName: 'demo',
+      })
+      expect(withWorktree.worktreePath).toBe(worktreeCwd)
+      expect(withWorktree.worktreeBranch).toBe('openclaude/bg-worktree-1')
+      expect(withWorktree.worktreeName).toBe('demo')
+
+      const plain = await createBackgroundSession({
+        id: 'bg-plain-1',
+        pid: 4243,
+        cwd: '/repo',
+        command: ['openclaude', '--print', 'do the work'],
+        sessionId: 'conversation-plain',
+      })
+      expect(plain.worktreePath).toBeUndefined()
+      expect(plain.worktreeBranch).toBeUndefined()
+      expect(plain.worktreeName).toBeUndefined()
+
+      const sessions = await listBackgroundSessions()
+      const reloaded = sessions.find(s => s.id === 'bg-worktree-1')
+      expect(reloaded?.cwd).toBe(worktreeCwd)
+      expect(reloaded?.worktreePath).toBe(worktreeCwd)
+      expect(reloaded?.worktreeBranch).toBe('openclaude/bg-worktree-1')
+      expect(reloaded?.worktreeName).toBe('demo')
+      expect(
+        sessions.find(s => s.id === 'bg-plain-1')?.worktreePath,
+      ).toBeUndefined()
+    } finally {
+      _setBackgroundSessionsRootForTesting(undefined)
+      await rm(configDir, { force: true, recursive: true })
+    }
   })
 
   it('parses log follow mode', () => {
