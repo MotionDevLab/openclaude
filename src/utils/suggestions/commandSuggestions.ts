@@ -125,6 +125,28 @@ function hintMatchesAtTokenBoundary(
 // Treat these characters as word separators for command search
 const SEPARATORS = /[:_-]/g
 
+/**
+ * Search-only synonyms for slash-command discovery (finder/typeahead).
+ * Keyed by lowercase command name. These NEVER affect execution:
+ * `findCommandByNameOrAlias` and the execute path of
+ * `applyCommandSuggestion` resolve only the command's real name/aliases, so
+ * a synonym surfaces the command in the suggestion list but cannot invoke
+ * anything by itself. Keep this table tiny: `/bg` is two letters, so new
+ * users search for what it does ("background", "worktree-pr") rather than
+ * its name. `jobs` needs no entry — it is already a real alias.
+ */
+const COMMAND_SYNONYMS: Record<string, string[]> = {
+  bg: ['background', 'worktree-pr'],
+}
+
+/**
+ * Extra search terms for a command, beyond its real name/aliases.
+ * Read from the static table above.
+ */
+function getCommandSynonyms(commandName: string): string[] {
+  return COMMAND_SYNONYMS[commandName.toLowerCase()] ?? []
+}
+
 type CommandSearchItem = {
   descriptionKey: string[]
   partKey: string[] | undefined
@@ -222,8 +244,16 @@ function getCommandSearchSnapshots(
       continue
     }
     const aliases = safeCommandAliases(command, commandName)
+    // Merge search-only synonyms into the snapshot's alias list so Fuse
+    // scoring, identifier matching/ranking, and the "(alias)" parenthetical
+    // all treat them like aliases. Execution resolution is untouched (it
+    // reads `command.aliases` directly, never the snapshot).
+    const searchAliases = [
+      ...(aliases ?? []),
+      ...getCommandSynonyms(commandName),
+    ]
     snapshots.push({
-      aliases,
+      aliases: searchAliases,
       command,
       commandName,
       isHidden: safeIsHidden(command),

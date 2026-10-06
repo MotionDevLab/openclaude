@@ -11,7 +11,6 @@ const bg = {
     {
       name: 'ps',
       description: 'List background sessions',
-      argumentHint: '',
     },
     {
       name: 'logs',
@@ -27,7 +26,7 @@ const bg = {
       name: 'auto-pr',
       description:
         'Show or toggle draft auto-PR opt-in for this project (off by default)',
-      argumentHint: '[on|off]',
+      argumentHint: '[on|off|status]',
     },
   ],
   isEnabled: () => true,

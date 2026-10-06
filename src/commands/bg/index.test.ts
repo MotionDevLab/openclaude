@@ -47,8 +47,17 @@ describe('/bg registration', () => {
     for (const sub of command.subcommands ?? []) {
       expect(typeof sub.description).toBe('string')
       expect(sub.description.length).toBeGreaterThan(0)
-      expect('argumentHint' in sub).toBe(true)
+      // argumentHint is optional (N1: `ps` omits it — it takes no args);
+      // when present it must be a non-empty hint.
+      if ('argumentHint' in sub) {
+        expect(typeof sub.argumentHint).toBe('string')
+        expect(sub.argumentHint?.length).toBeGreaterThan(0)
+      }
     }
+    // N1: `ps` takes no args, so it declares no hint key at all.
+    expect(
+      command.subcommands?.find(s => s.name === 'ps'),
+    ).not.toHaveProperty('argumentHint')
   })
 
   test('isEnabled is default-on', () => {
@@ -293,6 +302,20 @@ describe('/bg auto-pr toggle (mocked settings)', () => {
     })
     const res = expectText(await call('auto-pr on', makeContext()))
     expect(res.value).toContain('Failed to update auto-PR setting')
+  })
+
+  test('auto-pr status is a documented query alias for bare auto-pr', async () => {
+    const call = createBgCommandCall({
+      psHandler: async () => {},
+      logsHandler: async () => {},
+      killHandler: async () => {},
+      getProjectAutoPr: () => undefined,
+      getProjectSettingsPath: () => '/proj/.openclaude/settings.json',
+      updateProjectAutoPr: () => null,
+    })
+    const res = expectText(await call('auto-pr status', makeContext()))
+    expect(res.value).toContain('disabled (default off)')
+    expect(res.value).toContain('Usage: /bg auto-pr <on|off>')
   })
 
   test('auto-pr with junk shows usage', async () => {

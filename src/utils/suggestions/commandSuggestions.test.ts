@@ -12,6 +12,7 @@ import {
   getCommandSuggestionForEnter,
   getCommandSuggestionsMaxWidth,
   generateCommandSuggestions,
+  isSubcommandSuggestion,
 } from './commandSuggestions.js'
 
 function promptCommand({
@@ -1436,5 +1437,204 @@ describe('generateCommandSuggestions subcommands', () => {
         description: 'a subcommand',
       }),
     ).toBe(true)
+  })
+})
+
+describe('generateCommandSuggestions bg synonyms', () => {
+  // Fixture mirrors the real /bg command (src/commands/bg/index.ts):
+  // type, name, real alias, hint, and subcommands. `jobs` is a real alias
+  // (execution resolves it); `background`/`worktree-pr` are search-only
+  // synonyms from COMMAND_SYNONYMS (discovery only, never execution).
+  function bgCommand(): Command {
+    return {
+      type: 'local',
+      name: 'bg',
+      description:
+        'Run tasks in the background with worktree isolation and draft-PR on success',
+      aliases: ['jobs'],
+      argumentHint: '[ps|logs <id>|kill <id>|auto-pr <on|off>]',
+      subcommands: [
+        { name: 'ps', description: 'List background sessions' },
+        {
+          name: 'logs',
+          description: 'Show a background session log',
+          argumentHint: '<id-or-name> [--stderr|--stdout]',
+        },
+        {
+          name: 'kill',
+          description: 'Stop a background session (verified PID only)',
+          argumentHint: '<id-or-name>',
+        },
+        {
+          name: 'auto-pr',
+          description:
+            'Show or toggle draft auto-PR opt-in for this project (off by default)',
+          argumentHint: '[on|off|status]',
+        },
+      ],
+      isHidden: false,
+    } as unknown as Command
+  }
+
+  function bgPlusModel(): Command[] {
+    return [
+      bgCommand(),
+      {
+        type: 'local',
+        name: 'model',
+        description: 'Change model',
+        isHidden: false,
+      } as unknown as Command,
+    ]
+  }
+
+  test('background query resolves to /bg', () => {
+    const names = generateCommandSuggestions('/background', bgPlusModel()).map(
+      item => item.displayText,
+    )
+
+    expect(names).toContain('/bg (background)')
+  })
+
+  test('jobs alias query resolves to /bg', () => {
+    const names = generateCommandSuggestions('/jobs', bgPlusModel()).map(
+      item => item.displayText,
+    )
+
+    expect(names).toContain('/bg (jobs)')
+  })
+
+  test('worktree-pr query resolves to /bg', () => {
+    const names = generateCommandSuggestions(
+      '/worktree-pr',
+      bgPlusModel(),
+    ).map(item => item.displayText)
+
+    expect(names).toContain('/bg (worktree-pr)')
+  })
+
+  test('synonyms surface /bg but never execute it', () => {
+    const commands = bgPlusModel()
+
+    // A synonym fills the input; it cannot invoke the command.
+    let filled: string | undefined
+    let submitted = false
+    applyCommandSuggestion(
+      'background',
+      true,
+      commands,
+      value => {
+        filled = value
+      },
+      () => {},
+      value => {
+        submitted = true
+        filled = value
+      },
+    )
+
+    expect(filled).toBe('/background ')
+    expect(submitted).toBe(false)
+  })
+
+  test('the jobs alias still executes while synonyms do not', () => {
+    const commands = bgPlusModel()
+
+    let filled: string | undefined
+    let submitted = false
+    applyCommandSuggestion(
+      'jobs',
+      true,
+      commands,
+      value => {
+        filled = value
+      },
+      () => {},
+      value => {
+        submitted = true
+        filled = value
+      },
+    )
+
+    expect(filled).toBe('/jobs ')
+    expect(submitted).toBe(true)
+  })
+
+  test('/bg with trailing space suggests all four subcommands', () => {
+    const results = generateCommandSuggestions('/bg ', bgPlusModel())
+
+    expect(results.map(item => item.displayText).sort()).toEqual(
+      ['/bg auto-pr', '/bg kill', '/bg logs', '/bg ps'].sort(),
+    )
+  })
+
+  test('/bg prefix filters subcommands', () => {
+    const commands = bgPlusModel()
+
+    expect(
+      generateCommandSuggestions('/bg a', commands).map(
+        item => item.displayText,
+      ),
+    ).toEqual(['/bg auto-pr'])
+    expect(
+      generateCommandSuggestions('/bg ps', commands).map(
+        item => item.displayText,
+      ),
+    ).toEqual(['/bg ps'])
+  })
+
+  test('/bg subcommand rows satisfy the useTypeahead subcommand gate', () => {
+    // useTypeahead only takes the subcommand branch when every item passes
+    // isSubcommandSuggestion; /bg rows must qualify.
+    const results = generateCommandSuggestions('/bg ', bgPlusModel())
+
+    expect(results.length).toBe(4)
+    expect(results.every(isSubcommandSuggestion)).toBe(true)
+  })
+
+  test('selecting a /bg subcommand fills the input and never executes', () => {
+    const commands = bgPlusModel()
+    const results = generateCommandSuggestions('/bg ', commands)
+    const kill = results.find(item => item.displayText === '/bg kill')
+
+    expect(kill).toBeDefined()
+
+    let filledValue: string | undefined
+    let submitted = false
+    applyCommandSuggestion(
+      kill!,
+      true,
+      commands,
+      value => {
+        filledValue = value
+      },
+      () => {},
+      value => {
+        submitted = true
+        filledValue = value
+      },
+    )
+
+    expect(filledValue).toBe('/bg kill ')
+    expect(submitted).toBe(false)
+  })
+
+  test('bare slash list keeps one row for /bg', () => {
+    const names = generateCommandSuggestions('/', bgPlusModel()).map(
+      item => item.displayText,
+    )
+
+    expect(names).toContain('/bg')
+    expect(names).not.toContain('/bg ps')
+    expect(names).not.toContain('/bg auto-pr')
+  })
+
+  test('/bg subcommand items have unique stable ids', () => {
+    const results = generateCommandSuggestions('/bg ', bgPlusModel())
+    const ids = results.map(item => item.id)
+
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(ids).toContain('bg:local:sub:ps')
+    expect(ids).toContain('bg:local:sub:auto-pr')
   })
 })

@@ -7,6 +7,7 @@ import type {
   LocalCommandCall,
   LocalCommandResult,
 } from '../../types/command.js'
+import { logForDebugging } from '../../utils/debug.js'
 import {
   getSettingsFilePathForSource,
   getSettingsForSource,
@@ -20,7 +21,7 @@ export const BG_HELP =
   '  /bg ps                          list background sessions\n' +
   '  /bg logs <id-or-name> [--stderr|--stdout]   show a session log\n' +
   '  /bg kill <id-or-name>           stop a session (verified PID only)\n' +
-  '  /bg auto-pr [on|off]            show or toggle draft auto-PR opt-in for this project (off by default)'
+  '  /bg auto-pr [on|off|status]      show or toggle draft auto-PR opt-in for this project (off by default)'
 
 export const BG_FOLLOW_HINT =
   'Live follow (-f/--follow) is not supported from the slash command. ' +
@@ -100,6 +101,8 @@ async function captureHandlerOutput(
         .join(' ') + '\n'
   }) as typeof console.error
   process.stdout.write = ((chunk: unknown, ..._rest: unknown[]) => {
+    // Callbacks are intentionally dropped: capture is synchronous string
+    // accumulation, so there is never an async flush to signal.
     stdout = appendChunk(stdout, chunk)
     return true
   }) as typeof process.stdout.write
@@ -162,9 +165,8 @@ async function runLogs(
   }
   try {
     const captured = await captureHandlerOutput(() => deps.logsHandler(rest))
-    if (captured.exitCode !== undefined && captured.exitCode !== 0) {
-      return toText(formatCaptured(captured))
-    }
+    // Non-zero exit from fail() is intentionally rendered as captured text
+    // (the slash UX shows the handler's error output instead of throwing).
     return toText(formatCaptured(captured))
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
@@ -235,7 +237,12 @@ async function runAutoPr(
         })
       }
     } catch {
-      // App-state sync is best-effort; the settings file write already succeeded.
+      // App-state sync is best-effort and stays silent to the user (the
+      // settings file write already succeeded), but leave a debug-log
+      // breadcrumb so sync failures are still diagnosable.
+      logForDebugging('bg auto-pr: setAppState sync failed (settings file write already succeeded)', {
+        level: 'warn',
+      })
     }
     const effective = next.enabled === true
     return toText(
@@ -273,6 +280,9 @@ export function createBgCommandCall(
       case 'auto-pr':
       case 'autopr':
       case 'auto_pr':
+        // `autopr`/`auto_pr` are intentional hidden spelling conveniences
+        // (kept out of the hint/help so the primary `auto-pr` contract stays
+        // unambiguous); `status` is the documented query alias (see hint+help).
         return runAutoPr(resolved, rest, context)
       default:
         return toText(`Unknown /bg subcommand: ${subRaw}\n\n${BG_HELP}`)
