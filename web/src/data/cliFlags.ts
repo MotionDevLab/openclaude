@@ -80,13 +80,14 @@ export const flagGroups: FlagGroup[] = [
     label: 'background sessions',
     intro: 'Detached jobs via --bg. Note: --worktree here isolates a background job; -w, --worktree (sessions) isolates a foreground session instead.',
     flags: [
-      { flag: '--bg', arg: '"<prompt>"', description: 'Run a prompt detached from the current terminal as a background session.' },
+      { flag: '--bg', arg: '"<prompt>"', description: 'Run a prompt detached from the current terminal as a background session (alias --background).' },
       { flag: '--bg --worktree', description: 'Run this background job in an isolated git worktree (opt-in, off by default; kept after the job finishes).' },
       { flag: '--bg --keep-worktree', description: 'Reserved for the worktree cleanup policy; currently inert (worktrees are always kept).' },
       { flag: '--bg --worktree --auto-pr', arg: '[--pr-title "..."] [--pr-dry-run]', description: 'On job success, open a draft PR from the job worktree (opt-in, off by default; needs autoPR.enabled in project settings; always --draft).' },
       { flag: 'ps', description: 'List background sessions (shows the worktree path and branch for isolated jobs, plus the draft PR URL when auto-PR ran).' },
       { flag: 'logs', arg: '<id-or-name> [-f]', description: 'Show a background session log, optionally following it (appends the draft PR URL on auto-PR success).' },
-      { flag: 'kill', arg: '<id-or-name>', description: 'Stop a background session.' },
+      { flag: 'kill', arg: '<id-or-name>', description: 'Stop a background session (verified PID only).' },
+      { flag: '/bg', arg: '[ps|logs <id>|kill <id>|auto-pr <on|off>]', description: 'Manage background sessions from inside the TUI (alias /jobs; subcommands ps|logs|kill|auto-pr, where auto-pr toggles the project opt-in, off by default). Spawning stays in the terminal via --bg.' },
     ],
   },
   {
