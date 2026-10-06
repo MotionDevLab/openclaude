@@ -2,7 +2,7 @@
 
 OpenClaude supports multiple search backends through a provider adapter system.
 
-**Exa is the default search backend.** With no configuration at all, web search
+**Exa is the zero-config search backend.** With no configuration at all, web search
 runs on Exa's keyless free tier. Add an `EXA_API_KEY` for higher limits; any other
 backend you configure with a key is used before the free tier.
 
@@ -89,11 +89,11 @@ export WEB_SEARCH_API=https://search.example.com/search
 | `ddg` | DuckDuckGo only — throws on failure |
 | `native` | Anthropic native / Codex only |
 
-**Auto mode priority:** exa → ollama → firecrawl → tavily → you → jina → brave → bing → mojeek → linkup → exa free tier → ddg
+**Auto mode priority:** ollama → firecrawl → tavily → exa → you → jina → brave → bing → mojeek → linkup → exa free tier → ddg
 
-Each entry is only tried when it is configured (has its key or route). Keyed Exa
-leads the chain; any other keyed backend still runs before the keyless Exa free
-tier, and DuckDuckGo is the last resort.
+Each entry is only tried when it is configured (has its key or route). Configured
+backends run in the priority order above (fork: Ollama first); keyed Exa still
+runs before the keyless Exa free tier, and DuckDuckGo is the last resort.
 
 In `auto` mode, providers with built-in web search (Anthropic first-party,
 Vertex, Foundry, Codex) keep using it. Set `WEB_SEARCH_PROVIDER=exa` to use Exa

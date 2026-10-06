@@ -547,7 +547,7 @@ remain in the selected model, but context-limit keys use the model name before
 
 ### Web search
 
-[Exa](https://exa.ai) is the default web search backend. With no setup, searches
+[Exa](https://exa.ai) provides the zero-config search path. With no setup, searches
 on non-Anthropic models use Exa's keyless free tier, which has per-second and
 daily limits. Run `/search` to pick a backend, add or remove an API key in a
 hidden input, check which backend is active (`/search status`), or run a test
@@ -557,7 +557,7 @@ search (`/search test`). `/search` saves its choices to the `env` block of
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `WEB_SEARCH_PROVIDER` | No | `auto` (default): keyed Exa first, then any other backend you configured with a key, then the Exa free tier, then DuckDuckGo. Anthropic first-party, Vertex, Foundry, and Codex keep their built-in search in `auto`. Set one backend (`exa`, `tavily`, `brave`, `firecrawl`, `you`, `jina`, `bing`, `mojeek`, `linkup`, `ollama`, `ddg`, `custom`, or `native`) to use only that backend and fail instead of falling back. |
+| `WEB_SEARCH_PROVIDER` | No | `auto` (default): configured backends in priority order (Ollama first, then Firecrawl, Tavily, Exa, and the rest), then the Exa free tier, then DuckDuckGo. Anthropic first-party, Vertex, Foundry, and Codex keep their built-in search in `auto`. Set one backend (`exa`, `tavily`, `brave`, `firecrawl`, `you`, `jina`, `bing`, `mojeek`, `linkup`, `ollama`, `ddg`, `custom`, or `native`) to use only that backend and fail instead of falling back. |
 | `EXA_API_KEY` | No | Exa API key for higher limits than the free tier. Free keys: https://dashboard.exa.ai/api-keys |
 | `EXA_SEARCH_TYPE` | No | Exa search type with a key: `auto` (default), `instant`, `fast`, `deep-lite`, `deep`, or `deep-reasoning`. The deep types can need a higher `WEB_SEARCH_TIMEOUT_SEC`. |
 | `EXA_NUM_RESULTS` | No | Results per Exa search, 1–50 (default `15`). |

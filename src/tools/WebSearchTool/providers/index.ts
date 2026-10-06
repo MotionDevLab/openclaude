@@ -50,12 +50,12 @@ export { extractHits } from './custom.js'
 // ---------------------------------------------------------------------------
 // All registered providers — order matters for auto mode
 // ---------------------------------------------------------------------------
-// Priority: exa → ollama → firecrawl → tavily → you → jina → brave → bing → mojeek → linkup → exa-free → ddg
-// Exa is the default search backend: the keyed API leads the chain whenever
-// EXA_API_KEY is set. Any other backend the user configured with a key comes
-// next, so an explicit setup still beats a free tier. The keyless Exa free
-// tier is the zero-config default (per-second and daily limits), and DDG
-// stays last because its scraper is the most aggressively rate-limited.
+// Priority: ollama → firecrawl → tavily → exa → you → jina → brave → bing → mojeek → linkup → exa-free → ddg
+// FORK: ollama-first auto-chain order (upstream 790c009a leads with exa) —
+// deliberate fork identity, see exa-port-plan.md §2. Local-first: a configured
+// Ollama keeps precedence; keyed Exa still runs ahead of the free tier.
+// The keyless Exa free tier is the last keyless resort before DDG, which stays
+// last because its scraper is the most aggressively rate-limited.
 // Brave sits ahead of Bing because it runs an independent index (not Google/Bing
 // dependent) and has a usable free tier; Bing's hosted API was sunsetted in 2025
 // for new users, so it's a worse fallback in practice.
@@ -64,10 +64,10 @@ export { extractHits } from './custom.js'
 //       This prevents the generic outbound provider from silently becoming the default backend.
 
 const ALL_PROVIDERS: SearchProvider[] = [
-  exaProvider,
   ollamaProvider,
   firecrawlProvider,
   tavilyProvider,
+  exaProvider,
   youProvider,
   jinaProvider,
   braveProvider,

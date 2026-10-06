@@ -399,7 +399,7 @@ describe('getAvailableProviders', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Exa as the default backend
+// Auto-chain ordering (fork: ollama-first)
 // ---------------------------------------------------------------------------
 
 function clearKeyedSearchProviders(): void {
@@ -438,15 +438,16 @@ function exaFreeSseResponse(text: string, isError = false): Response {
   })
 }
 
-describe('Exa default ordering', () => {
-  test('keyed Exa leads the auto chain', () => {
+describe('auto-chain ordering (fork: ollama-first)', () => {
+  test('configured Ollama leads the auto chain', () => {
     clearKeyedSearchProviders()
     process.env.EXA_API_KEY = 'exa-test-key'
     process.env.OLLAMA_API_KEY = 'ollama-test-key'
     process.env.TAVILY_API_KEY = 'tvly-test-key'
 
     const names = getProviderChain('auto').map(p => p.name)
-    expect(names[0]).toBe('exa')
+    expect(names[0]).toBe('ollama')
+    expect(names.indexOf('exa')).toBeLessThan(names.indexOf('duckduckgo'))
   })
 
   test('with no keys, the auto chain is the Exa free tier then DuckDuckGo', () => {

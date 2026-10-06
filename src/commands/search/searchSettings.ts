@@ -45,7 +45,7 @@ export const SEARCH_BACKENDS: readonly SearchBackendOption[] = [
   {
     mode: 'auto',
     label: 'Auto (recommended)',
-    description: 'Exa first, then any backend you configured, then free fallbacks',
+    description: 'Configured backends in priority order, then the Exa free tier, then DuckDuckGo',
   },
   {
     mode: 'exa',

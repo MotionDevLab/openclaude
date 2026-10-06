@@ -158,7 +158,7 @@ Inside OpenClaude:
 
 - run `/provider` for guided provider setup and saved profiles
 - run `/onboard-github` for GitHub Models onboarding
-- run `/search` to choose the web search backend (Exa by default) or add a search API key
+- run `/search` to choose the web search backend or add a search API key
 
 > **Note:** OpenClaude does not automatically load project `.env` files. We recommend using the `/provider` command for setup, which saves provider profiles and credentials in `.openclaude-profile.json`. If you prefer environment variables, export them explicitly or run `openclaude --provider-env-file .env` for provider/setup variables. Export runtime/debug knobs from your shell or launcher. To boot a configured lane with zero typing, set a `providerEnvFile` settings default instead of passing the flag every time; user-defined `customProviders` lanes give it a real name in the banner and `/provider`. See [docs/custom-providers.md](docs/custom-providers.md).
 
@@ -430,7 +430,7 @@ See [Agent Routing and Step Limits](docs/agent-routing.md) for the full guide.
 
 ## Web Search and Fetch
 
-[Exa](https://exa.ai) is the default web search backend. With no setup, `WebSearch` on non-Anthropic models uses Exa's keyless free tier, which has per-second and daily limits. Run `/search` to pick a backend, add an API key, or test search:
+[Exa](https://exa.ai) provides the zero-config search path. With no setup, `WebSearch` on non-Anthropic models uses Exa's keyless free tier, which has per-second and daily limits. Run `/search` to pick a backend, add an API key, or test search:
 
 ```text
 /search              # pick a backend
