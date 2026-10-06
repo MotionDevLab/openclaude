@@ -295,6 +295,119 @@ describe('background session finalizer', () => {
     expect(unrefCalls).toBe(1)
   })
 
+  it('runs the auto-PR hook after natural-termination exit-0 only', async () => {
+    async function runFinalizedSession(
+      finalized: BackgroundSession,
+      exitCode: number,
+    ): Promise<{ order: string[]; hookSessions: BackgroundSession[] }> {
+      let beforeExitListener: (() => void | Promise<void>) | undefined
+      const order: string[] = []
+      const hookSessions: BackgroundSession[] = []
+      await prepareBackgroundSessionFinalizer({
+        env: {
+          [BACKGROUND_SESSION_ID_ENV]: finalized.id,
+          [BACKGROUND_SESSION_LAUNCHER_PID_ENV]: '123',
+        },
+        pid: 500,
+        readSession: async () => ownedSession(finalized.id, 500),
+        registerCleanup: () => () => {},
+        onBeforeExit: listener => {
+          beforeExitListener = listener
+        },
+        onExit: () => {},
+        finalize: async () => {
+          order.push('finalize')
+          return finalized
+        },
+        runAutoPrForSession: async session => {
+          order.push('auto-pr')
+          hookSessions.push(session)
+        },
+        startCleanupWorker: () => {
+          order.push('worker')
+        },
+      })
+      const previousExitCode = process.exitCode
+      process.exitCode = exitCode
+      try {
+        await beforeExitListener?.()
+      } finally {
+        process.exitCode = previousExitCode
+      }
+      return { order, hookSessions }
+    }
+
+    const optedIn: BackgroundSession = {
+      ...ownedSession('bg-autopr-hook', 500),
+      status: 'exited',
+      exitCode: 0,
+      worktreePath: '/repo',
+      worktreeBranch: 'bg/demo',
+      autoPR: { enabled: true },
+    }
+    const fired = await runFinalizedSession(optedIn, 0)
+    expect(fired.order).toEqual(['finalize', 'auto-pr', 'worker'])
+    expect(fired.hookSessions).toHaveLength(1)
+    expect(fired.hookSessions[0]?.autoPR).toEqual({ enabled: true })
+
+    const nonZero = await runFinalizedSession(
+      { ...optedIn, id: 'bg-autopr-nonzero', exitCode: 3 },
+      3,
+    )
+    expect(nonZero.order).toEqual(['finalize', 'worker'])
+    expect(nonZero.hookSessions).toEqual([])
+
+    const notOptedIn = await runFinalizedSession(
+      {
+        ...ownedSession('bg-autopr-plain', 500),
+        status: 'exited',
+        exitCode: 0,
+      },
+      0,
+    )
+    expect(notOptedIn.order).toEqual(['finalize', 'worker'])
+    expect(notOptedIn.hookSessions).toEqual([])
+  })
+
+  it('still spawns the cleanup worker when the auto-PR hook throws', async () => {
+    let beforeExitListener: (() => void | Promise<void>) | undefined
+    const order: string[] = []
+    await prepareBackgroundSessionFinalizer({
+      env: {
+        [BACKGROUND_SESSION_ID_ENV]: 'bg-autopr-hook-fails',
+        [BACKGROUND_SESSION_LAUNCHER_PID_ENV]: '123',
+      },
+      pid: 500,
+      readSession: async () => ownedSession('bg-autopr-hook-fails', 500),
+      registerCleanup: () => () => {},
+      onBeforeExit: listener => {
+        beforeExitListener = listener
+      },
+      onExit: () => {},
+      finalize: async () => {
+        order.push('finalize')
+        return {
+          ...ownedSession('bg-autopr-hook-fails', 500),
+          status: 'exited',
+          exitCode: 0,
+          worktreePath: '/repo',
+          autoPR: { enabled: true },
+        }
+      },
+      runAutoPrForSession: async () => {
+        order.push('auto-pr')
+        throw new Error('boom')
+      },
+      startCleanupWorker: () => {
+        order.push('worker')
+      },
+      debug: () => {},
+    })
+
+    await beforeExitListener?.()
+    expect(order).toEqual(['finalize', 'auto-pr', 'worker'])
+  })
+
   it('passes only settings-source inputs to the detached cleanup worker', () => {
     let spawnedArgs: readonly string[] | undefined
     let spawnedEnv: NodeJS.ProcessEnv | undefined

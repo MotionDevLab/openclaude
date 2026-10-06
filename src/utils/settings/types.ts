@@ -629,7 +629,32 @@ export const SettingsSchema = lazySchema(() =>
         .optional()
         .describe(
           'Auto-fix configuration: automatically run lint/test after AI file edits ' +
-          'and feed errors back for self-repair.',
+            'and feed errors back for self-repair.',
+        ),
+      autoPR: z
+        .object({
+          enabled: z
+            .boolean()
+            .optional()
+            .describe(
+              'Opt in to draft auto-PR for --bg --worktree --auto-pr jobs in this project. Off by default.',
+            ),
+          cleanup: z
+            .enum(['keep'])
+            .optional()
+            .describe(
+              'Reserved for the auto-PR worktree cleanup policy; currently only "keep" is recognized (worktrees are always kept).',
+            ),
+          dryRun: z
+            .boolean()
+            .optional()
+            .describe(
+              'Print the gh argv instead of pushing/creating when set (same as --pr-dry-run).',
+            ),
+        })
+        .optional()
+        .describe(
+          'Draft-only auto-PR for opted-in --bg --worktree --auto-pr jobs. Off by default; requires enabled: true in this project\'s .openclaude/settings.json (explicit per-project opt-in). PRs are always created with --draft, never ready; nothing is pushed unless the finalizer guards pass.',
         ),
       worktree: z
         .preprocess((val: unknown) => {
@@ -668,6 +693,12 @@ export const SettingsSchema = lazySchema(() =>
             .boolean()
             .optional()
             .describe('Deprecated alias for autoConfigureLongPaths.'),
+          mode: z
+            .enum(['on-demand'])
+            .optional()
+            .describe(
+              'Reserved worktree mode selector; currently only "on-demand" is recognized and behavior is unchanged (isolation for opted-in -w/--worktree and --bg --worktree jobs).',
+            ),
         }))
         .optional()
         .describe(
