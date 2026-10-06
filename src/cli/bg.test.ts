@@ -4,13 +4,16 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import {
+  AUTO_PR_CHILD_INSTRUCTION,
   buildBackgroundSessionLaunch,
   buildBackgroundChildProcessConfig,
   buildBackgroundSessionDisplayCommand,
   confirmBackgroundSessionLaunch,
   followLogFile,
+  injectAutoPrInstruction,
   killBackgroundSession,
   printExistingLog,
+  resolveAutoPrForLaunch,
   terminateBackgroundSessionProcessTree,
   terminateBackgroundProcessTree,
   LOG_STREAM_CHUNK_SIZE,
@@ -621,6 +624,99 @@ describe('background session CLI parsing', () => {
     expect(() =>
       resolveBackgroundWorktreeSlug('../../../x', 'bg-12345678'),
     ).toThrow('Invalid worktree name')
+  })
+
+  it('parses --auto-pr/--pr-title/--pr-dry-run before -- and strips them from child args', () => {
+    const parsed = parseBackgroundInvocation([
+      '--bg',
+      '--worktree',
+      '--auto-pr',
+      '--pr-title',
+      'Ship it',
+      '--pr-dry-run',
+      'do the work',
+    ])
+
+    expect(parsed.autoPr).toBe(true)
+    expect(parsed.prTitle).toBe('Ship it')
+    expect(parsed.prDryRun).toBe(true)
+    expect(parsed.prompt).toBe('do the work')
+    expect(parsed.childArgs).toEqual(['--print', 'do the work'])
+  })
+
+  it('parses the --pr-title=value form and strips it from child args', () => {
+    const parsed = parseBackgroundInvocation([
+      '--bg',
+      '--auto-pr',
+      '--pr-title=Ship it',
+      'do the work',
+    ])
+
+    expect(parsed.autoPr).toBe(true)
+    expect(parsed.prTitle).toBe('Ship it')
+    expect(parsed.childArgs).toEqual(['--print', 'do the work'])
+  })
+
+  it('does not mistake the --pr-title value for the prompt', () => {
+    const parsed = parseBackgroundInvocation([
+      '--bg',
+      '--pr-title',
+      'Ship it',
+      'do the work',
+    ])
+
+    expect(parsed.prTitle).toBe('Ship it')
+    expect(parsed.prompt).toBe('do the work')
+  })
+
+  it('treats --auto-pr after -- as prompt text, not a job flag', () => {
+    const parsed = parseBackgroundInvocation(['--bg', '--', '--auto-pr'])
+
+    expect(parsed.autoPr).toBeUndefined()
+    expect(parsed.prompt).toBe('--auto-pr')
+    expect(parsed.childArgs).toEqual(['--print', '--', '--auto-pr'])
+  })
+
+  it('fails closed when --auto-pr lacks the per-project settings opt-in', () => {
+    expect(() => resolveAutoPrForLaunch({}, null)).toThrow(
+      'auto-PR not enabled for this project',
+    )
+    expect(() => resolveAutoPrForLaunch({}, {})).toThrow(
+      'auto-PR not enabled for this project',
+    )
+    expect(() =>
+      resolveAutoPrForLaunch({}, { autoPR: { enabled: false } }),
+    ).toThrow('auto-PR not enabled for this project')
+  })
+
+  it('resolves the auto-PR launch when the project opted in', () => {
+    expect(
+      resolveAutoPrForLaunch(
+        { title: 'Ship it' },
+        { autoPR: { enabled: true } },
+      ),
+    ).toEqual({ title: 'Ship it', dryRun: false })
+    expect(
+      resolveAutoPrForLaunch({}, { autoPR: { enabled: true, dryRun: true } }),
+    ).toEqual({ dryRun: true })
+    expect(
+      resolveAutoPrForLaunch(
+        { dryRun: true },
+        { autoPR: { enabled: true, dryRun: false } },
+      ),
+    ).toEqual({ dryRun: true })
+  })
+
+  it('appends the fixed auto-PR instruction block to the child prompt', () => {
+    expect(AUTO_PR_CHILD_INSTRUCTION).toBe(
+      'On success, draft the PR: write `.openclaude/bg-pr.md` (line 1 = title ≤70 chars, rest = Summary + Test plan) AND echo `PR_TITLE:`/`PR_BODY:` markers to stdout. Plain text only, no secrets.',
+    )
+    expect(
+      injectAutoPrInstruction(['--print', 'do the work'], 'do the work'),
+    ).toEqual(['--print', `do the work\n\n${AUTO_PR_CHILD_INSTRUCTION}`])
+    expect(injectAutoPrInstruction(['--print'], undefined)).toEqual([
+      '--print',
+    ])
   })
 
   it('round-trips worktree fields through the registry; absent means non-worktree', async () => {

@@ -59,6 +59,12 @@ export type BackgroundSession = {
   worktreePath?: string
   worktreeBranch?: string
   worktreeName?: string
+  /** Opt-in `--bg --auto-pr` draft-PR config. Absent or disabled = no PR attempted. */
+  autoPR?: BackgroundSessionAutoPrConfig
+  /** Draft PR URL stored by the finalizer auto-PR hook on success. */
+  prUrl?: string
+  /** Last auto-PR failure message. Set alongside a stored `exited` status; never flips status. */
+  prError?: string
   sessionId: string
   processMarker?: string
   terminalFactGeneration?: string
@@ -77,6 +83,12 @@ export type BackgroundSessionTerminalReason =
   | 'exit_code'
   | 'signal'
   | 'explicit_kill'
+
+export type BackgroundSessionAutoPrConfig = {
+  enabled: boolean
+  title?: string
+  dryRun?: boolean
+}
 
 type BackgroundSessionTerminalFact = {
   version: 1
@@ -105,6 +117,7 @@ export type CreateBackgroundSessionInput = {
   worktreePath?: string
   worktreeBranch?: string
   worktreeName?: string
+  autoPR?: BackgroundSessionAutoPrConfig
   sessionId: string
   processMarker?: string
   now?: Date
@@ -1261,6 +1274,18 @@ function isTerminalReason(
   )
 }
 
+function isBackgroundSessionAutoPrConfig(
+  value: unknown,
+): value is BackgroundSessionAutoPrConfig {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<BackgroundSessionAutoPrConfig>
+  return (
+    typeof candidate.enabled === 'boolean' &&
+    (candidate.title === undefined || typeof candidate.title === 'string') &&
+    (candidate.dryRun === undefined || typeof candidate.dryRun === 'boolean')
+  )
+}
+
 function isBackgroundSession(
   value: unknown,
   expectedId: string,
@@ -1288,6 +1313,11 @@ function isBackgroundSession(
       typeof candidate.worktreeBranch === 'string') &&
     (candidate.worktreeName === undefined ||
       typeof candidate.worktreeName === 'string') &&
+    (candidate.autoPR === undefined ||
+      isBackgroundSessionAutoPrConfig(candidate.autoPR)) &&
+    (candidate.prUrl === undefined || typeof candidate.prUrl === 'string') &&
+    (candidate.prError === undefined ||
+      typeof candidate.prError === 'string') &&
     typeof candidate.sessionId === 'string' &&
     (candidate.processMarker === undefined ||
       isValidBackgroundProcessMarker(candidate.processMarker)) &&
@@ -2488,6 +2518,17 @@ export async function createBackgroundSession(
   ) {
     throw new Error('Invalid background process marker')
   }
+  if (
+    input.autoPR !== undefined &&
+    (typeof input.autoPR !== 'object' ||
+      typeof input.autoPR.enabled !== 'boolean' ||
+      (input.autoPR.title !== undefined &&
+        typeof input.autoPR.title !== 'string') ||
+      (input.autoPR.dryRun !== undefined &&
+        typeof input.autoPR.dryRun !== 'boolean'))
+  ) {
+    throw new Error('Invalid background session auto-PR config')
+  }
   await assertBackgroundSessionNameAvailable(input.name)
   const timestamp = iso(input.now)
   const logPaths = getBackgroundSessionLogPaths(input.id)
@@ -2502,6 +2543,7 @@ export async function createBackgroundSession(
     ...(input.worktreePath ? { worktreePath: input.worktreePath } : {}),
     ...(input.worktreeBranch ? { worktreeBranch: input.worktreeBranch } : {}),
     ...(input.worktreeName ? { worktreeName: input.worktreeName } : {}),
+    ...(input.autoPR ? { autoPR: input.autoPR } : {}),
     sessionId: input.sessionId,
     ...(input.processMarker
       ? { processMarker: input.processMarker }
@@ -3091,6 +3133,42 @@ export async function markBackgroundSessionKilled(
       await releaseNameReservation(rawSession.name, rawSession.id)
     }
     return await applyAuthoritativeTerminalFacts(rawSession)
+  })
+}
+
+export type RecordBackgroundSessionAutoPrResultInput = {
+  prUrl?: string
+  prError?: string
+  now?: Date
+}
+
+/**
+ * Store the finalizer auto-PR outcome on a session. Never changes status:
+ * a success records `prUrl` (clearing any earlier `prError`), a failure
+ * records `prError`. Returns the updated session, or null when the session
+ * record is gone (the caller then only keeps the log line).
+ */
+export async function recordBackgroundSessionAutoPrResult(
+  id: string,
+  result: RecordBackgroundSessionAutoPrResultInput,
+): Promise<BackgroundSession | null> {
+  assertSafeId(id)
+  return await withBackgroundSessionIdLock(id, async () => {
+    const session = await readSessionFile(metadataPathForId(id))
+    if (!session || session.id !== id) return null
+    if (result.prUrl === undefined && result.prError === undefined) {
+      return session
+    }
+    const updated: BackgroundSession = {
+      ...session,
+      ...(result.prUrl !== undefined
+        ? { prUrl: result.prUrl }
+        : { prError: result.prError ?? '' }),
+      updatedAt: iso(result.now),
+    }
+    if (result.prUrl !== undefined) delete updated.prError
+    await replaceSessionFile(updated, metadataPathForId(id))
+    return updated
   })
 }
 

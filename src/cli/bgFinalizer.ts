@@ -13,10 +13,14 @@ import {
   type ObservedBackgroundSessionSignal,
 } from '../utils/backgroundSessionTermination.js'
 import {
+  maybeRunAutoPrForSession,
+} from './bgAutoPr.js'
+import {
   readBackgroundSessionForOwner,
   recordBackgroundSessionNaturalTermination,
   recordBackgroundSessionNaturalTerminationSync,
   type BackgroundSession,
+  type BackgroundSessionNaturalTermination,
 } from './bgRegistry.js'
 import {
   BACKGROUND_SESSION_CLEANUP_OWNER_PID_ENV,
@@ -72,6 +76,11 @@ type PrepareBackgroundSessionFinalizerOptions = {
   settingsCwd?: string
   getObservedSignal?: () => ObservedBackgroundSessionSignal | undefined
   debug?: (message: string) => void
+  /**
+   * Auto-PR hook override (tests). Defaults to `maybeRunAutoPrForSession`,
+   * which only acts on exit-0 + opted-in + worktree sessions and never throws.
+   */
+  runAutoPrForSession?: (session: BackgroundSession) => Promise<void>
 }
 
 export type BackgroundSessionFinalizerPreparation =
@@ -498,8 +507,9 @@ export async function prepareBackgroundSessionFinalizer(
 
   const finalizeAwaited = async () => {
     if (finalized) return
+    let completed: BackgroundSession | null
     try {
-      await finalize(id, currentTermination(), {
+      completed = await finalize(id, currentTermination(), {
         ownerPid,
         expectedSession: ownedSession,
       })
@@ -507,6 +517,26 @@ export async function prepareBackgroundSessionFinalizer(
     } catch (error) {
       reportFinalizationFailure(debug, error)
       return
+    }
+    // Auto-PR runs only on the natural-termination exit-0 path, after the
+    // terminal fact is recorded (status stays `exited`; failures land in
+    // `prError`). The sync `exit`-event path below cannot run async `gh`
+    // work, so it intentionally skips this hook. Explicit `kill` records a
+    // `killed` fact through a different path and never reaches this hook.
+    const completedSession = completed ?? ownedSession
+    if (
+      completedSession.status === 'exited' &&
+      completedSession.exitCode === 0 &&
+      completedSession.autoPR?.enabled === true &&
+      completedSession.worktreePath
+    ) {
+      try {
+        const runAutoPrForSession =
+          options.runAutoPrForSession ?? maybeRunAutoPrForSession
+        await runAutoPrForSession(completedSession)
+      } catch (error) {
+        reportFinalizationFailure(debug, error)
+      }
     }
     startPostFinalizationCleanup()
   }

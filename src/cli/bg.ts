@@ -14,6 +14,7 @@ import {
   parseRootOptionValue,
 } from '../utils/printFlag.js'
 import { isProcessRunning } from '../utils/genericProcessUtils.js'
+import { getSettingsForSource } from '../utils/settings/settings.js'
 import { validateWorktreeSlug } from '../utils/worktree.js'
 import {
   assertBackgroundSessionNameAvailable,
@@ -47,6 +48,12 @@ export type ParsedBackgroundInvocation = {
   worktree?: boolean
   /** Reserved for the worktree cleanup policy; parsed but inert in PR-A. */
   keepWorktree?: boolean
+  /** Opt-in `--bg --auto-pr` draft PR on success (off by default; needs settings opt-in). */
+  autoPr?: boolean
+  /** Explicit PR title for `--auto-pr` (`--pr-title`). */
+  prTitle?: string
+  /** `--pr-dry-run`: print the `gh` argv instead of pushing/creating. */
+  prDryRun?: boolean
   childArgs: string[]
 }
 
@@ -163,6 +170,7 @@ const REQUIRED_OPTION_VALUE_FLAGS = new Set([
   '--permission-mode',
   '--permission-prompt-tool',
   '--plugin-dir',
+  '--pr-title',
   '--prefill',
   '--provider',
   '--provider-env-file',
@@ -316,21 +324,36 @@ function stripBackgroundFlag(args: string[]): string[] {
   const delimiterIndex = args.indexOf('--')
   const head = delimiterIndex === -1 ? args : args.slice(0, delimiterIndex)
   const tail = delimiterIndex === -1 ? [] : args.slice(delimiterIndex)
-  return [
-    // --worktree/--keep-worktree are job-level directives consumed by the
-    // launcher: the child already runs with cwd set to the worktree, so they
-    // must not reach the child (where -w/--worktree would create a second,
-    // nested session worktree). Only exact tokens before `--` are consumed;
-    // anything after `--` is prompt text.
-    ...head.filter(
-      arg =>
-        arg !== '--bg' &&
-        arg !== '--background' &&
-        arg !== '--worktree' &&
-        arg !== '--keep-worktree',
-    ),
-    ...tail,
-  ]
+  const stripped: string[] = []
+  for (let i = 0; i < head.length; i++) {
+    const arg = head[i]
+    // --worktree/--keep-worktree/--auto-pr/--pr-dry-run are job-level
+    // directives consumed by the launcher: the child already runs with cwd
+    // set to the worktree, so they must not reach the child (where
+    // -w/--worktree would create a second, nested session worktree). Only
+    // exact tokens before `--` are consumed; anything after `--` is prompt
+    // text.
+    if (
+      arg === '--bg' ||
+      arg === '--background' ||
+      arg === '--worktree' ||
+      arg === '--keep-worktree' ||
+      arg === '--auto-pr' ||
+      arg === '--pr-dry-run'
+    ) {
+      continue
+    }
+    // --pr-title carries a value (space- or equals-separated) that must not
+    // reach the child either, where it would be an unknown flag.
+    if (arg === '--pr-title') {
+      const next = head[i + 1]
+      if (next !== undefined && !next.startsWith('-')) i++
+      continue
+    }
+    if (arg !== undefined && arg.startsWith('--pr-title=')) continue
+    stripped.push(arg)
+  }
+  return [...stripped, ...tail]
 }
 
 function hasBackgroundJobFlag(args: string[], flag: string): boolean {
@@ -515,6 +538,9 @@ export function parseBackgroundInvocation(
   // prompt text (e.g. `--bg -- --worktree` asks about --worktree).
   const worktree = hasBackgroundJobFlag(args, '--worktree')
   const keepWorktree = hasBackgroundJobFlag(args, '--keep-worktree')
+  const autoPr = hasBackgroundJobFlag(args, '--auto-pr')
+  const prDryRun = hasBackgroundJobFlag(args, '--pr-dry-run')
+  const prTitle = findFlagValue(args, '--pr-title')?.trim() || undefined
   let childArgs = stripBackgroundProcessMarkerArgs(stripBackgroundFlag(args))
   const name = findSessionName(childArgs)?.trim() || undefined
   const promptIndex = findPromptIndex(childArgs)
@@ -529,7 +555,69 @@ export function parseBackgroundInvocation(
     ...(prompt ? { prompt } : {}),
     ...(worktree ? { worktree: true as const } : {}),
     ...(keepWorktree ? { keepWorktree: true as const } : {}),
+    ...(autoPr ? { autoPr: true as const } : {}),
+    ...(prTitle ? { prTitle } : {}),
+    ...(prDryRun ? { prDryRun: true as const } : {}),
     childArgs,
+  }
+}
+
+/**
+ * Fixed instruction block appended to the child prompt when `--auto-pr` is
+ * opted in. A constant: no user input is ever interpolated into instructions.
+ */
+export const AUTO_PR_CHILD_INSTRUCTION =
+  'On success, draft the PR: write `.openclaude/bg-pr.md` (line 1 = title ≤70 chars, rest = Summary + Test plan) AND echo `PR_TITLE:`/`PR_BODY:` markers to stdout. Plain text only, no secrets.'
+
+/**
+ * Append the auto-PR instruction block to the prompt element of already
+ * parsed child args. Returns the input unchanged when there is no prompt
+ * (e.g. `--resume` without a message): the deterministic template fallback
+ * still produces a PR, so injection is best-effort only.
+ */
+export function injectAutoPrInstruction(
+  childArgs: string[],
+  prompt: string | undefined,
+): string[] {
+  if (!prompt) return childArgs
+  const next = [...childArgs]
+  const promptIndex = findPromptIndex(next)
+  if (promptIndex === -1) return childArgs
+  const current = next[promptIndex]
+  if (current === undefined) return childArgs
+  next[promptIndex] = `${current}\n\n${AUTO_PR_CHILD_INSTRUCTION}`
+  return next
+}
+
+export type AutoPrOptInRequest = {
+  title?: string
+  dryRun?: boolean
+}
+
+export type ProjectAutoPrSettings = {
+  autoPR?: {
+    enabled?: boolean
+    dryRun?: boolean
+  }
+} | null | undefined
+
+/**
+ * Fail-closed gate for `--auto-pr`: requires explicit per-project opt-in
+ * (`autoPR.enabled: true` in the cwd's project settings). Throws otherwise,
+ * so the caller fails before spawning any child. Never defaults on.
+ */
+export function resolveAutoPrForLaunch(
+  request: AutoPrOptInRequest,
+  projectSettings: ProjectAutoPrSettings,
+): { title?: string; dryRun: boolean } {
+  if (projectSettings?.autoPR?.enabled !== true) {
+    throw new Error(
+      'auto-PR not enabled for this project (set autoPR.enabled: true in .openclaude/settings.json to opt in)',
+    )
+  }
+  return {
+    ...(request.title ? { title: request.title } : {}),
+    dryRun: request.dryRun ?? projectSettings.autoPR.dryRun ?? false,
   }
 }
 
@@ -625,6 +713,13 @@ function printSessionTable(
 
   for (const row of rows) {
     console.log(row.map((cell, i) => cell.padEnd(widths[i])).join('  '))
+  }
+
+  for (const session of sessions) {
+    if (session.prUrl) console.log(`PR ${session.id}: ${session.prUrl}`)
+    else if (session.prError) {
+      console.log(`PR ${session.id} error: ${session.prError}`)
+    }
   }
 }
 
@@ -1119,6 +1214,12 @@ export async function logsHandler(
   } catch (error) {
     fail(`Failed to read log file: ${errorMessage(error)}`)
   }
+  // The finalizer also appends the draft PR URL to the stdout log tail; echo
+  // the stored outcome so `logs` surfaces it even when the tail rotated.
+  if (parsed.stream === 'stdout' && !parsed.follow) {
+    if (session.prUrl) console.log(`PR: ${session.prUrl}`)
+    else if (session.prError) console.log(`PR error: ${session.prError}`)
+  }
   if (parsed.follow) {
     await followLogFile(logPath, offset)
   }
@@ -1172,7 +1273,30 @@ export async function handleBgFlag(args: string[]): Promise<void> {
   const parsed = parseBackgroundInvocation(args)
   if (!parsed.prompt && !hasResumeSource(parsed.childArgs)) {
     fail(
-      'Usage: openclaude --bg [--name <name>] [--worktree] [--keep-worktree] "<prompt>"',
+      'Usage: openclaude --bg [--name <name>] [--worktree] [--keep-worktree] [--auto-pr] [--pr-title "..."] [--pr-dry-run] "<prompt>"',
+    )
+  }
+
+  // Fail-closed auto-PR gate: explicit per-project settings opt-in is
+  // required before any side effect (worktree, spawn). The instruction block
+  // is injected into the child prompt before spawn.
+  let autoPr: { title?: string; dryRun: boolean } | undefined
+  let launchChildArgs = parsed.childArgs
+  if (parsed.autoPr) {
+    try {
+      autoPr = resolveAutoPrForLaunch(
+        {
+          ...(parsed.prTitle ? { title: parsed.prTitle } : {}),
+          ...(parsed.prDryRun ? { dryRun: true as const } : {}),
+        },
+        getSettingsForSource('projectSettings'),
+      )
+    } catch (error) {
+      fail(errorMessage(error))
+    }
+    launchChildArgs = injectAutoPrInstruction(
+      parsed.childArgs,
+      parsed.prompt,
     )
   }
 
@@ -1195,7 +1319,7 @@ export async function handleBgFlag(args: string[]): Promise<void> {
     }
   }
   const { childArgs, sessionId } = await buildBackgroundSessionLaunch(
-    parsed.childArgs,
+    launchChildArgs,
     randomUUID(),
   ).catch(error => {
     fail(errorMessage(error))
@@ -1302,6 +1426,15 @@ export async function handleBgFlag(args: string[]): Promise<void> {
     ...(worktree ? { worktreePath: worktree.path } : {}),
     ...(worktree?.branch ? { worktreeBranch: worktree.branch } : {}),
     ...(worktree ? { worktreeName: worktree.name } : {}),
+    ...(autoPr
+      ? {
+          autoPR: {
+            enabled: true as const,
+            ...(autoPr.title ? { title: autoPr.title } : {}),
+            ...(autoPr.dryRun ? { dryRun: true as const } : {}),
+          },
+        }
+      : {}),
     sessionId,
     processMarker,
     stdoutLogPath: logPaths.stdoutLogPath,
