@@ -34,3 +34,10 @@
 
 ## Constraints honored
 Bun; no runtime code changed; no subagents dispatched; no push/PR/merge; `main` untouched; settings `.describe()` text unchanged.
+
+## Fix round 1 (F1 — `commands.ts` omission)
+- Reviewer finding F1 (`task-4-review.md`): `web/src/data/commands.ts` had no `/bg` entry while listing every other slash command. Fixed with the reviewer's concrete entry verbatim.
+- File changed: `web/src/data/commands.ts` (+1 line, session section after `tasks`): `{ name: 'bg', description: 'Manage background sessions from inside the TUI (alias /jobs; spawn with openclaude --bg "...")', category: 'session', args: '[ps|logs <id>|kill <id>|auto-pr <on|off>]' }`. Field order (name/description/category/args) matches neighboring entries; `args` verbatim from `src/commands/bg/index.ts:9`; nothing else touched.
+- Fix commit: `9cda03dd` (content commit; amended once to record this SHA, so final HEAD differs by that one line only — verify with `git log --oneline -3`). — `fix(bg): Task 4 fix round 1 - add /bg to web slash-command catalog (F1)`.
+- `bun run web:typecheck` after fix → **0 errors, 0 warnings, 0 hints** (33 files, `astro check`).
+- F2–F4 unaffected (no other surface touched).
