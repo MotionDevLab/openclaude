@@ -55,6 +55,7 @@ import {
 } from './commands/request-size/index.js'
 import resume, { continueCommand } from './commands/resume/index.js'
 import review, { ultrareview } from './commands/review.js'
+import search from './commands/search/index.js'
 import session from './commands/session/index.js'
 import setContextWindow from './commands/set-context-window/index.js'
 import share from './commands/share/index.js'
@@ -341,6 +342,7 @@ const COMMANDS = memoize((): Command[] => [
   requestSize,
   requestSizeNonInteractive,
   resume,
+  search,
   session,
   setContextWindow,
   skills,
