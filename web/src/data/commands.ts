@@ -73,6 +73,7 @@ export const commands: SlashCommand[] = [
   { name: 'btw', description: 'Ask a quick side question without interrupting the main conversation', category: 'session', args: '<question>' },
   { name: 'goal', description: 'Set and manage a session completion goal', category: 'session', args: '[condition|status|pause|resume|clear]' },
   { name: 'tasks', description: 'List and manage background tasks', category: 'session' },
+  { name: 'bg', description: 'Manage background sessions from inside the TUI (alias /jobs; spawn with openclaude --bg "...")', category: 'session', args: '[ps|logs <id>|kill <id>|auto-pr <on|off>]' },
   { name: 'session', description: 'Show remote session URL and QR code', category: 'session' },
   { name: 'desktop', description: 'Continue the current session in Claude Desktop', category: 'session' },
   { name: 'mobile', description: 'Show QR code to download the Claude mobile app', category: 'session' },

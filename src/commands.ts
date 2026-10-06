@@ -2,6 +2,7 @@
 import addDir from './commands/add-dir/index.js'
 import autofixPr from './commands/autofix-pr/index.js'
 import backfillSessions from './commands/backfill-sessions/index.js'
+import bg from './commands/bg/index.js'
 import btw from './commands/btw/index.js'
 import goodClaude from './commands/good-claude/index.js'
 import goal from './commands/goal/index.js'
@@ -287,6 +288,7 @@ const COMMANDS = memoize((): Command[] => [
   bughunter,
   bughunterSecurity,
   bughunterPerf,
+  bg,
   btw,
   cacheProbe,
   cacheStats,

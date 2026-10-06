@@ -219,6 +219,12 @@ pushing; failures land in `prError` without changing the `exited` status.
 The hook runs on the natural-termination path only: a job that ends via an
 explicit `process.exit(0)` records `exited` but skips the auto-PR silently.
 
+From inside the TUI, `/bg ps`, `/bg logs <id>`, and `/bg kill <id>` manage
+sessions without leaving the session (`/jobs` is an alias; `/bg auto-pr
+<on|off>` toggles the project auto-PR opt-in, off by default). New sessions
+are still spawned from the terminal (`openclaude --bg "..."`), and
+`openclaude --help` documents the same flags under "Background sessions".
+
 Background sessions are local child processes. OpenClaude does not start a daemon
 or network service, and permission/provider/model/settings flags are passed to
 the child process the same way they are for a foreground `--print` run. Session
