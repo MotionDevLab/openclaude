@@ -153,6 +153,10 @@ async function runPs(deps: BgHandlers): Promise<LocalCommandResult> {
   }
 }
 
+function isCapturedEmpty(captured: { stdout: string; stderr: string }): boolean {
+  return captured.stdout.trimEnd() === '' && captured.stderr.trimEnd() === ''
+}
+
 async function runLogs(
   deps: BgHandlers,
   rest: string[],
@@ -167,6 +171,13 @@ async function runLogs(
     const captured = await captureHandlerOutput(() => deps.logsHandler(rest))
     // Non-zero exit from fail() is intentionally rendered as captured text
     // (the slash UX shows the handler's error output instead of throwing).
+    if (isCapturedEmpty(captured)) {
+      const target = rest.find(arg => !arg.startsWith('-')) ?? '<id-or-name>'
+      return toText(
+        `No captured output for "${target}" yet. The session may still be starting.\n` +
+          'Use --stderr or --stdout to select a stream.',
+      )
+    }
     return toText(formatCaptured(captured))
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

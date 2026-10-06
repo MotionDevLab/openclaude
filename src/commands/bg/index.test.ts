@@ -154,6 +154,17 @@ describe('/bg subcommand dispatch', () => {
     expect(res.value).toContain('streamed-log-bytes')
   })
 
+  test('logs with empty handler output names the target and hints at streams', async () => {
+    const call = createBgCommandCall({
+      psHandler: async () => {},
+      logsHandler: async () => {},
+      killHandler: async () => {},
+    })
+    const res = expectText(await call('logs bg-abc', makeContext()))
+    expect(res.value).toContain('"bg-abc"')
+    expect(res.value).toContain('--stderr')
+  })
+
   test('logs without a target shows usage without calling the handler', async () => {
     let called = false
     const call = createBgCommandCall({
