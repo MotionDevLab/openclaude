@@ -14,6 +14,7 @@ import {
   parseRootOptionValue,
 } from '../utils/printFlag.js'
 import { isProcessRunning } from '../utils/genericProcessUtils.js'
+import { validateWorktreeSlug } from '../utils/worktree.js'
 import {
   assertBackgroundSessionNameAvailable,
   backgroundSessionLogExists,
@@ -42,6 +43,10 @@ import {
 export type ParsedBackgroundInvocation = {
   name?: string
   prompt?: string
+  /** Opt-in `--bg --worktree` isolation for this background job (off by default). */
+  worktree?: boolean
+  /** Reserved for the worktree cleanup policy; parsed but inert in PR-A. */
+  keepWorktree?: boolean
   childArgs: string[]
 }
 
@@ -312,9 +317,24 @@ function stripBackgroundFlag(args: string[]): string[] {
   const head = delimiterIndex === -1 ? args : args.slice(0, delimiterIndex)
   const tail = delimiterIndex === -1 ? [] : args.slice(delimiterIndex)
   return [
-    ...head.filter(arg => arg !== '--bg' && arg !== '--background'),
+    // --worktree/--keep-worktree are job-level directives consumed by the
+    // launcher: the child already runs with cwd set to the worktree, so they
+    // must not reach the child (where -w/--worktree would create a second,
+    // nested session worktree). Only exact tokens before `--` are consumed;
+    // anything after `--` is prompt text.
+    ...head.filter(
+      arg =>
+        arg !== '--bg' &&
+        arg !== '--background' &&
+        arg !== '--worktree' &&
+        arg !== '--keep-worktree',
+    ),
     ...tail,
   ]
+}
+
+function hasBackgroundJobFlag(args: string[], flag: string): boolean {
+  return argsBeforeDelimiter(args).includes(flag)
 }
 
 function findPromptIndex(args: string[]): number {
@@ -491,6 +511,10 @@ export async function buildBackgroundSessionLaunch(
 export function parseBackgroundInvocation(
   args: string[],
 ): ParsedBackgroundInvocation {
+  // Job-level flags are only recognized before `--`; after `--` they are
+  // prompt text (e.g. `--bg -- --worktree` asks about --worktree).
+  const worktree = hasBackgroundJobFlag(args, '--worktree')
+  const keepWorktree = hasBackgroundJobFlag(args, '--keep-worktree')
   let childArgs = stripBackgroundProcessMarkerArgs(stripBackgroundFlag(args))
   const name = findSessionName(childArgs)?.trim() || undefined
   const promptIndex = findPromptIndex(childArgs)
@@ -503,8 +527,26 @@ export function parseBackgroundInvocation(
   return {
     ...(name ? { name } : {}),
     ...(prompt ? { prompt } : {}),
+    ...(worktree ? { worktree: true as const } : {}),
+    ...(keepWorktree ? { keepWorktree: true as const } : {}),
     childArgs,
   }
+}
+
+/**
+ * Derive the worktree slug for an opted-in `--bg --worktree` job: the
+ * `--name` value when provided, otherwise the background session id
+ * (`bg-<shortid>`). Validates synchronously with the shared validator so
+ * unsafe names fail before any side effect (git, hook, spawn). Throws with
+ * the validator message; handleBgFlag converts it via fail().
+ */
+export function resolveBackgroundWorktreeSlug(
+  name: string | undefined,
+  fallbackId: string,
+): string {
+  const slug = name?.trim() ? name.trim() : fallbackId
+  validateWorktreeSlug(slug)
+  return slug
 }
 
 export function parseLogsInvocation(args: string[]): ParsedLogsInvocation {
@@ -572,7 +614,9 @@ function printSessionTable(
       String(session.pid),
       session.name ?? '-',
       session.startedAt,
-      session.cwd,
+      // cwd already points at the worktree for isolated jobs; surface the
+      // branch so `--bg --worktree` jobs are recognizable in `ps`.
+      session.worktreeBranch ? `${session.cwd} (${session.worktreeBranch})` : session.cwd,
     ]),
   ]
   const widths = rows[0].map((_, col) =>
@@ -1127,7 +1171,9 @@ export async function killHandler(
 export async function handleBgFlag(args: string[]): Promise<void> {
   const parsed = parseBackgroundInvocation(args)
   if (!parsed.prompt && !hasResumeSource(parsed.childArgs)) {
-    fail('Usage: openclaude --bg [--name <name>] "<prompt>"')
+    fail(
+      'Usage: openclaude --bg [--name <name>] [--worktree] [--keep-worktree] "<prompt>"',
+    )
   }
 
   try {
@@ -1138,12 +1184,51 @@ export async function handleBgFlag(args: string[]): Promise<void> {
 
   const id = backgroundSessionId()
   const processMarker = generateBackgroundProcessMarker()
+  // Validate the worktree slug before any side effect (git, hook, spawn):
+  // on failure nothing (dirs/logs/worktrees) is left behind.
+  let worktreeSlug: string | undefined
+  if (parsed.worktree) {
+    try {
+      worktreeSlug = resolveBackgroundWorktreeSlug(parsed.name, id)
+    } catch (error) {
+      fail(errorMessage(error))
+    }
+  }
   const { childArgs, sessionId } = await buildBackgroundSessionLaunch(
     parsed.childArgs,
     randomUUID(),
   ).catch(error => {
     fail(errorMessage(error))
   })
+  // Create the worktree with the real child sessionId from the launch above
+  // (conversation restore keys on it), not a fresh id. A slug collision
+  // resumes the existing worktree instead of re-running setup.
+  // --keep-worktree is parsed but reserved for the cleanup policy: PR-A
+  // always keeps the worktree.
+  let worktree:
+    | { path: string; branch?: string; name: string }
+    | undefined
+  if (parsed.worktree && worktreeSlug) {
+    try {
+      const { createWorktreeForSession } = await import(
+        '../utils/worktree.js'
+      )
+      const worktreeSession = await createWorktreeForSession(
+        sessionId,
+        worktreeSlug,
+      )
+      worktree = {
+        path: worktreeSession.worktreePath,
+        ...(worktreeSession.worktreeBranch
+          ? { branch: worktreeSession.worktreeBranch }
+          : {}),
+        name: worktreeSession.worktreeName,
+      }
+    } catch (error) {
+      fail(errorMessage(error))
+    }
+  }
+  const cwd = worktree?.path ?? process.cwd()
   const logPaths = getBackgroundSessionLogPaths(id)
   await ensureBackgroundSessionDirs()
   const entrypoint = process.argv[1]
@@ -1178,7 +1263,7 @@ export async function handleBgFlag(args: string[]): Promise<void> {
     stderrFd = openSync(logPaths.stderrLogPath, 'wx')
     createdStderrLog = true
     child = spawn(childConfig.command, childConfig.args, {
-      cwd: process.cwd(),
+      cwd,
       detached: true,
       env: childConfig.env,
       stdio: ['ignore', stdoutFd, stderrFd],
@@ -1210,10 +1295,13 @@ export async function handleBgFlag(args: string[]): Promise<void> {
     id,
     name: parsed.name,
     pid: child.pid,
-    cwd: process.cwd(),
+    cwd,
     command,
     provider: resolveBackgroundSessionProvider(childArgs),
     model: resolveBackgroundSessionModel(childArgs),
+    ...(worktree ? { worktreePath: worktree.path } : {}),
+    ...(worktree?.branch ? { worktreeBranch: worktree.branch } : {}),
+    ...(worktree ? { worktreeName: worktree.name } : {}),
     sessionId,
     processMarker,
     stdoutLogPath: logPaths.stdoutLogPath,
@@ -1236,6 +1324,11 @@ export async function handleBgFlag(args: string[]): Promise<void> {
   )
   if (session.name) console.log(`Name: ${session.name}`)
   console.log(`PID: ${session.pid}`)
+  if (worktree) {
+    console.log(
+      `Worktree: ${worktree.path}${worktree.branch ? ` (${worktree.branch})` : ''}`,
+    )
+  }
   console.log(`Logs: ${session.stdoutLogPath}`)
   console.log(`Follow: openclaude logs ${session.id} -f`)
   console.log(

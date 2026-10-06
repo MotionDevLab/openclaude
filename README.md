@@ -189,11 +189,20 @@ Run long non-interactive prompts detached from the current terminal:
 ```bash
 openclaude --bg "fix failing tests"
 openclaude --bg --name auth-refactor "refactor auth middleware"
+openclaude --bg --worktree --name auth-refactor "refactor auth middleware"
 openclaude ps
 openclaude logs auth-refactor
 openclaude logs auth-refactor -f
 openclaude kill auth-refactor
 ```
+
+`--bg --worktree` is opt-in (off by default) and runs the background job in
+an isolated git worktree named after `--name` (or the `bg-<id>` fallback).
+This is the background-job counterpart to the foreground `-w, --worktree`
+session flag: `-w` isolates an interactive session, while `--bg --worktree`
+isolates a detached job. The worktree is kept after the job finishes
+(`--keep-worktree` is reserved for a future cleanup policy), and `openclaude
+ps` shows the worktree path and branch for isolated jobs.
 
 Background sessions are local child processes. OpenClaude does not start a daemon
 or network service, and permission/provider/model/settings flags are passed to

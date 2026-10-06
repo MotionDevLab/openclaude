@@ -76,6 +76,19 @@ export const flagGroups: FlagGroup[] = [
     ],
   },
   {
+    id: 'background',
+    label: 'background sessions',
+    intro: 'Detached jobs via --bg. Note: --worktree here isolates a background job; -w, --worktree (sessions) isolates a foreground session instead.',
+    flags: [
+      { flag: '--bg', arg: '"<prompt>"', description: 'Run a prompt detached from the current terminal as a background session.' },
+      { flag: '--bg --worktree', description: 'Run this background job in an isolated git worktree (opt-in, off by default; kept after the job finishes).' },
+      { flag: '--bg --keep-worktree', description: 'Reserved for the worktree cleanup policy; currently inert (worktrees are always kept).' },
+      { flag: 'ps', description: 'List background sessions (shows the worktree path and branch for isolated jobs).' },
+      { flag: 'logs', arg: '<id-or-name> [-f]', description: 'Show a background session log, optionally following it.' },
+      { flag: 'kill', arg: '<id-or-name>', description: 'Stop a background session.' },
+    ],
+  },
+  {
     id: 'permissions',
     label: 'permissions & tools',
     flags: [
