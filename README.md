@@ -216,6 +216,8 @@ the session (`openclaude ps` shows it, `openclaude logs` echoes it).
 instead of pushing/creating. Guarded: nothing to PR, existing PR,
 main/master/origin-HEAD, and worktree-symlink mismatches all abort without
 pushing; failures land in `prError` without changing the `exited` status.
+The hook runs on the natural-termination path only: a job that ends via an
+explicit `process.exit(0)` records `exited` but skips the auto-PR silently.
 
 Background sessions are local child processes. OpenClaude does not start a daemon
 or network service, and permission/provider/model/settings flags are passed to
