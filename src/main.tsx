@@ -3715,6 +3715,29 @@ async function run(): Promise<CommanderCommand> {
   }
   profileCheckpoint('run_main_options_built');
 
+  // Background sessions (bg discoverability Task 3): `ps|logs|kill` are
+  // intercepted in cli.tsx BEFORE commander, so commander lists nothing for
+  // them. This help-text-only section keeps `--help` discoverable with zero
+  // dispatch change: no commands/options are registered here, so `openclaude
+  // ps` still hits the local fast path with no config/provider/startup work.
+  // Keep the flag list in sync with the usage string in src/cli/bg.ts
+  // (handleBgFlag) and the `ps|logs|kill` usage lines there.
+  program.addHelpText(
+    'after',
+    [
+      '',
+      'Background sessions (local; ps|logs|kill need no config/provider):',
+      '  openclaude --bg [--name <name>] [--worktree] [--keep-worktree] [--auto-pr] [--pr-title "..."] [--pr-dry-run] "<prompt>"',
+      '    Run a prompt as a detached background session (aliases: --background). Manage with ps|logs|kill below, or /bg in the TUI.',
+      '  openclaude ps',
+      '    List background sessions.',
+      '  openclaude logs <id-or-name> [-f]',
+      '    Show a session log (use -f to follow).',
+      '  openclaude kill <id-or-name>',
+      '    Stop a background session (verified PID only).',
+    ].join('\n'),
+  );
+
   // -p/--print mode: skip subcommand registration. The 52 subcommands
   // (mcp, auth, plugin, skill, task, config, doctor, update, etc.) are
   // never dispatched in print mode — commander routes the prompt to the

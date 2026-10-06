@@ -1359,3 +1359,89 @@ describe('cli.tsx — --yolo alias (PR #1939)', () => {
     }
   })
 })
+
+describe('cli --help background sessions (bg discoverability Task 3)', () => {
+  const bgOptions = {
+    bgSessionsEnabled: true,
+    importers: mockImporters,
+  } as unknown as Parameters<CliMain>[1]
+  const savedArgv = [...process.argv]
+
+  beforeAll(async () => {
+    process.env.OPENCLAUDE_DISABLE_CLI_ENTRYPOINT_AUTO_RUN = '1'
+    const entrypoint = await import('./cli.js')
+    runCliEntrypoint = entrypoint.main
+  })
+
+  afterAll(() => {
+    process.argv = [...savedArgv]
+  })
+
+  beforeEach(() => {
+    clearRuntimeMocks()
+  })
+
+  afterEach(() => {
+    process.argv = [...savedArgv]
+  })
+
+  it('keeps ps on the local fast path even with a --help token (intercept precedes commander/config)', async () => {
+    // `openclaude ps --help` must still hit the cli.tsx intercept (args[0]
+    // === 'ps') — commander never sees it, and no config/provider/startup
+    // work runs. This is the reason the intercept exists; the Task 3
+    // help-text-only change must not alter it.
+    await runCliEntrypoint(['ps', '--help'], bgOptions)
+
+    expect(mockPsHandler.mock.calls).toEqual([[['--help']]])
+    expect(mockParseProviderEnvFileArgs).not.toHaveBeenCalled()
+    expect(mockHandleBgFlag).not.toHaveBeenCalled()
+    expect(mockEnableConfigs).not.toHaveBeenCalled()
+    expect(mockValidateProviderEnvForStartupOrExit).not.toHaveBeenCalled()
+    expect(mockCliMain).not.toHaveBeenCalled()
+  })
+
+  it('registers a help-text-only Background sessions section (no commander dispatch change)', async () => {
+    const src = await Bun.file(`${import.meta.dir}/../../src/main.tsx`).text()
+    // Help-text-only: addHelpText, not program.command/program.option.
+    expect(src).toContain("program.addHelpText(")
+    expect(src).toContain('Background sessions (local; ps|logs|kill need no config/provider)')
+    expect(src).toContain(
+      'openclaude --bg [--name <name>] [--worktree] [--keep-worktree] [--auto-pr] [--pr-title "..."] [--pr-dry-run] "<prompt>"',
+    )
+    expect(src).toContain('openclaude ps')
+    expect(src).toContain('openclaude logs <id-or-name> [-f]')
+    expect(src).toContain('openclaude kill <id-or-name>')
+    // No dispatch surface: the section must not register commands/options
+    // that could shadow the cli.tsx fast-path intercept.
+    const helpBlock = src.slice(src.indexOf('Background sessions (bg discoverability Task 3)'))
+    expect(helpBlock).not.toContain("program.command('ps')")
+    expect(helpBlock).not.toContain("program.command('logs')")
+    expect(helpBlock).not.toContain("program.command('kill')")
+  })
+
+  it('the built CLI --help shows the Background sessions section (live registration)', async () => {
+    // Behavioral proof the section is registered on the real program — not
+    // dead code: commander only prints addHelpText output in --help.
+    // --help short-circuits before any startup.
+    const fs = await import('node:fs')
+    const path = await import('node:path')
+    const cliPath = path.resolve(import.meta.dir, '../../dist/cli.mjs')
+    if (!fs.existsSync(cliPath)) return // needs `bun run build`; always present in CI
+    const childEnv: Record<string, string | undefined> = {
+      ...process.env,
+      OPENCLAUDE_DISABLE_TELEMETRY: '1',
+    }
+    delete childEnv.OPENCLAUDE_DISABLE_CLI_ENTRYPOINT_AUTO_RUN
+    const out = Bun.spawnSync(['node', cliPath, '--help'], { env: childEnv })
+    const text = `${out.stdout.toString()}${out.stderr.toString()}`
+    expect(out.exitCode).toBe(0)
+    expect(text).toContain('Background sessions')
+    expect(text).toContain('--bg')
+    expect(text).toContain('--worktree')
+    expect(text).toContain('--auto-pr')
+    expect(text).toContain('--pr-dry-run')
+    expect(text).toContain('openclaude ps')
+    expect(text).toContain('openclaude logs')
+    expect(text).toContain('openclaude kill')
+  }, { timeout: 20000 })
+})
