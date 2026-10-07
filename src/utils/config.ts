@@ -255,9 +255,13 @@ export function normalizeMaxMessagesCompactionThreshold(
 export const AUTO_COMPACT_TOKEN_PERCENTS = [
   'off',
   '50',
+  '55',
   '60',
+  '65',
   '70',
+  '75',
   '80',
+  '85',
   '90',
 ] as const
 // FORK: PR-B settable token-% trigger. The persisted type accepts any integer
