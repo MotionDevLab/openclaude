@@ -368,6 +368,28 @@ test('default active-message hard cap forces compaction', async () => {
   expect(seenTracking[0]?.forceReason).toBe('message-count')
 })
 
+test('custom message-count threshold forces compaction at that count', async () => {
+  saveGlobalConfig(current => ({
+    ...current,
+    // FORK: arbitrary positive-integer threshold (PR-A) — hand-edited via
+    // settings.json; presets stay as the /config quick-picks.
+    maxMessagesCompactionThreshold: '350' as MaxMessagesCompactionThreshold,
+  }))
+
+  // Below the custom threshold (but above the 200 default) must NOT force —
+  // this distinguishes a real 350 threshold from a reset-to-'200'.
+  const below = await runMessageCountHardCapQuery(manySmallMessages(201))
+  expect(below.terminal.reason).toBe('max_turns')
+  expect(below.seenTracking[0]?.forceReason).toBeUndefined()
+
+  const { terminal, callModel, seenTracking } =
+    await runMessageCountHardCapQuery(manySmallMessages(351))
+
+  expect(terminal.reason).toBe('max_turns')
+  expect(callModel).toHaveBeenCalledTimes(1)
+  expect(seenTracking[0]?.forceReason).toBe('message-count')
+})
+
 test('unset message threshold forces compaction at the 200-message default', async () => {
   const { terminal, callModel, seenTracking } =
     await runMessageCountHardCapQuery(manySmallMessages(201))

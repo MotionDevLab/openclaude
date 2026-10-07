@@ -30,6 +30,7 @@ import { logError } from './log.js'
 import type { MemoryType } from './memory/types.js'
 import { normalizePathForConfigKey } from './path.js'
 import { getEssentialTrafficOnlyReason } from './privacyLevel.js'
+import { getMaxActiveMessagesHardCap } from './maxActiveMessages.js'
 import { getManagedFilePath } from './settings/managedPath.js'
 import type { ThemeSetting } from './theme.js'
 import { PRIMARY_PROJECT_INSTRUCTION_FILE } from './projectInstructions.js'
@@ -194,23 +195,61 @@ export const MAX_MESSAGES_COMPACTION_THRESHOLDS = [
   '500',
   '1000',
 ] as const
+// FORK: PR-A widens the persisted type beyond the /config preset quick-picks
+// to any positive-integer string (custom values via settings.json hand-edit;
+// /config UI unchanged — no numeric input control exists). The preset const
+// above stays as the single source of truth for the UI options.
 export type MaxMessagesCompactionThreshold =
-  (typeof MAX_MESSAGES_COMPACTION_THRESHOLDS)[number]
+  | (typeof MAX_MESSAGES_COMPACTION_THRESHOLDS)[number]
+  | (string & {})
+
+const MAX_MESSAGES_COMPACTION_THRESHOLD_PATTERN = /^(0|[1-9]\d*)$/
 
 export function isValidMaxMessagesCompactionThreshold(
   value: unknown,
 ): value is MaxMessagesCompactionThreshold {
-  return MAX_MESSAGES_COMPACTION_THRESHOLDS.includes(
-    value as MaxMessagesCompactionThreshold,
-  )
+  if (value === 'off') {
+    return true
+  }
+  if (typeof value !== 'string') {
+    return false
+  }
+  // FORK: accept any positive-integer string, not just the UI presets.
+  const trimmed = value.trim()
+  if (!MAX_MESSAGES_COMPACTION_THRESHOLD_PATTERN.test(trimmed)) {
+    return false
+  }
+  const parsed = Number.parseInt(trimmed, 10)
+  return Number.isSafeInteger(parsed) && parsed > 0
 }
 
 export function normalizeMaxMessagesCompactionThreshold(
   value: unknown,
 ): MaxMessagesCompactionThreshold {
-  return isValidMaxMessagesCompactionThreshold(value)
-    ? (value as MaxMessagesCompactionThreshold)
-    : '200'
+  if (value === 'off') {
+    return 'off'
+  }
+  if (typeof value !== 'string') {
+    return '200'
+  }
+  const trimmed = value.trim()
+  if (
+    !MAX_MESSAGES_COMPACTION_THRESHOLD_PATTERN.test(trimmed) ||
+    !Number.isSafeInteger(Number.parseInt(trimmed, 10))
+  ) {
+    return '200'
+  }
+  const parsed = Number.parseInt(trimmed, 10)
+  if (parsed <= 0) {
+    return '200'
+  }
+  // FORK: clamp custom values to the hard cap instead of resetting unknown
+  // values to '200'. A hard cap of 0 disables clamping (no upper bound).
+  const hardCap = getMaxActiveMessagesHardCap()
+  if (hardCap > 0 && parsed > hardCap) {
+    return String(hardCap)
+  }
+  return String(parsed)
 }
 
 export type OutputStyle = string
@@ -696,7 +735,9 @@ export type GlobalConfig = {
   logoColor?: string
 
   // Message-count-based compaction threshold. Set via /config.
-  // 'off' = disabled. Otherwise, one of '100', '200', '500', '1000'.
+  // 'off' = disabled. Otherwise, any positive-integer string: the /config
+  // presets ('100', '200', '500', '1000') are quick-picks, while custom
+  // values go via settings.json hand-edit (clamped to the hard cap).
   // When enabled, triggers forced compaction if the message count exceeds the
   // chosen threshold, regardless of token usage.
   maxMessagesCompactionThreshold?: MaxMessagesCompactionThreshold
