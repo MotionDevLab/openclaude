@@ -4281,9 +4281,12 @@ export function ProviderManager({ mode, onDone }: Props): React.ReactNode {
     }
 
     // Offer a way back to built-in Anthropic only when a third-party provider
-    // (saved profile or GitHub Models) is currently active — otherwise the user
-    // is already on Anthropic and the option is a no-op (#1426).
-    if (includeAnthropic && (activeProfileId || isGithubActive)) {
+    // (saved profile, GitHub Models, or custom lane) is currently active —
+    // otherwise the user is already on Anthropic and the option is a no-op (#1426).
+    if (
+      includeAnthropic &&
+      (activeProfileId || isGithubActive || isCustomLaneActive)
+    ) {
       selectOptions.push({
         value: ANTHROPIC_DEFAULT_PROFILE_ID,
         label: 'Use Anthropic (built-in)',

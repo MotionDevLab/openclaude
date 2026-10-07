@@ -6568,3 +6568,179 @@ test('ProviderManager custom lane activation failure restores the previous env',
     restoreCustomLaneEnv(envSnapshot)
   }
 })
+
+test('ProviderManager switches back to Anthropic from a custom-lane-only session', async () => {
+  // Custom-lane-only session (no saved profiles, no GitHub Models) must offer
+  // the same "Use Anthropic (built-in)" recovery option as the GitHub-active
+  // path. Selecting it resets the session model via AppState and clears the
+  // managed provider flags.
+  //
+  // The test mutates process-wide env and mounts an Ink app, so both are
+  // snapshotted/restored in finally — a failed wait or assertion must not leak
+  // provider flags or a live mount into later tests.
+  const githubEnvKeys = [
+    'CLAUDE_CODE_USE_GITHUB',
+    'GITHUB_TOKEN',
+    'GH_TOKEN',
+    'CLAUDE_CODE_SIMPLE',
+  ] as const
+  const githubEnvSnapshot = new Map(
+    githubEnvKeys.map(key => [key, process.env[key]] as const),
+  )
+  const customEnvSnapshot = snapshotCustomLaneEnv()
+  let mounted: Awaited<ReturnType<typeof mountProviderManager>> | undefined
+
+  try {
+    delete process.env.CLAUDE_CODE_SIMPLE
+    delete process.env.CLAUDE_CODE_USE_GITHUB
+    delete process.env.GITHUB_TOKEN
+    delete process.env.GH_TOKEN
+
+    process.env.CLAUDE_CODE_USE_OPENAI = '1'
+    process.env.OPENAI_BASE_URL = 'http://127.0.0.1:8080/v1'
+    process.env.OPENAI_MODEL = 'example-model'
+    delete process.env.OPENAI_API_BASE
+    delete process.env.OPENAI_API_KEY
+
+    // Capture the real providerProfiles module before the mock replaces it so the
+    // Anthropic sentinel id and preset helpers stay intact.
+    const realProviderProfiles = await import('../utils/providerProfiles.js')
+
+    const githubSyncRead = mock(() => undefined)
+    const githubAsyncRead = mock(async () => undefined)
+    mockProviderManagerDependencies(githubSyncRead, githubAsyncRead, {
+      getProviderProfiles: () => [],
+      getActiveProviderProfile: () => null,
+    })
+    mockCustomLaneEntries()
+
+    const clearActiveProviderProfile = mock(() => {
+      for (const key of Object.keys(process.env)) {
+        if (key.startsWith('CLAUDE_CODE_USE_')) {
+          delete process.env[key]
+        }
+      }
+      return true
+    })
+    const clearHydratedGithubModelsTokenFromEnv = mock(() => {})
+    mock.module('../utils/providerProfiles.js', () => ({
+      ...realProviderProfiles,
+      applyActiveProviderProfileFromConfig: () => {},
+      getProviderProfiles: () => [],
+      getActiveProviderProfile: () => null,
+      setActiveProviderProfile: mock(() => null),
+      clearActiveProviderProfile,
+    }))
+    mock.module('../utils/githubModelsCredentials.js', () => ({
+      clearGithubModelsToken: () => ({ success: true }),
+      clearHydratedGithubModelsTokenFromEnv,
+      GITHUB_MODELS_HYDRATED_ENV_MARKER: 'CLAUDE_CODE_GITHUB_TOKEN_HYDRATED',
+      hydrateGithubModelsTokenFromSecureStorage: () => {},
+      readGithubModelsToken: () => undefined,
+      readGithubModelsTokenAsync: async () => undefined,
+    }))
+    const clearStartupProviderOverrides = mock(() => null)
+    mock.module('../utils/providerStartupOverrides.js', () => ({
+      clearStartupProviderOverrides,
+    }))
+
+    const onDoneResults: Array<Record<string, unknown>> = []
+    const appStateChanges: Array<{
+      newState: { mainLoopModel?: unknown; mainLoopModelForSession?: unknown }
+      oldState: { mainLoopModel?: unknown }
+    }> = []
+    const nonce = `${Date.now()}-${Math.random()}`
+    const { ProviderManager } = await import(`./ProviderManager.js?ts=${nonce}`)
+    mounted = await mountProviderManager(ProviderManager, {
+      onDone: result => {
+        if (result && typeof result === 'object') {
+          onDoneResults.push(result as Record<string, unknown>)
+        }
+      },
+      onChangeAppState: args => {
+        appStateChanges.push(
+          args as {
+            newState: {
+              mainLoopModel?: unknown
+              mainLoopModelForSession?: unknown
+            }
+            oldState: { mainLoopModel?: unknown }
+          },
+        )
+      },
+    })
+
+    await waitForFrameOutput(
+      mounted.getOutput,
+      frame =>
+        frame.includes('Provider manager') &&
+        frame.includes('Set active provider'),
+    )
+
+    // Open "Set active provider" (second menu item).
+    mounted.stdin.write('j')
+    await Bun.sleep(25)
+    mounted.stdin.write('\r')
+
+    // Options here are [Example Gateway (active), Use Anthropic (built-in)];
+    // move down to the switch-back option and select it.
+    await waitForFrameOutput(
+      mounted.getOutput,
+      frame => frame.includes('Use Anthropic (built-in)'),
+    )
+
+    mounted.stdin.write('j')
+    await Bun.sleep(25)
+    mounted.stdin.write('\r')
+
+    await waitForCondition(() => onDoneResults.length > 0)
+
+    const result = onDoneResults[0]
+    expect(result.action).toBe('activated')
+    expect(String(result.activeProviderName)).toMatch(/anthropic/i)
+    expect(typeof result.activeProviderModel).toBe('string')
+    expect((result.activeProviderModel as string).length).toBeGreaterThan(0)
+    // The switch-back must also refresh the live session AppState — that is the
+    // path onChangeAppState uses to update the runtime mainLoopModelOverride, so
+    // without it the running session could keep the previous provider model after
+    // selecting "Use Anthropic (built-in)".
+    const anthropicModel = result.activeProviderModel as string
+    await waitForCondition(() =>
+      appStateChanges.some(
+        ({ newState }) => newState.mainLoopModel === anthropicModel,
+      ),
+    )
+    expect(
+      appStateChanges.some(
+        ({ newState, oldState }) =>
+          newState.mainLoopModel === anthropicModel &&
+          oldState.mainLoopModel !== newState.mainLoopModel,
+      ),
+    ).toBe(true)
+    expect(
+      appStateChanges.some(
+        ({ newState }) =>
+          newState.mainLoopModel === anthropicModel &&
+          newState.mainLoopModelForSession === null,
+      ),
+    ).toBe(true)
+    expect(
+      Object.keys(process.env).some(key => key.startsWith('CLAUDE_CODE_USE_')),
+    ).toBe(false)
+    expect(clearActiveProviderProfile).toHaveBeenCalled()
+    expect(clearStartupProviderOverrides).toHaveBeenCalled()
+  } finally {
+    if (mounted) {
+      await mounted.dispose()
+    }
+    restoreCustomLaneEntries()
+    restoreCustomLaneEnv(customEnvSnapshot)
+    for (const [key, value] of githubEnvSnapshot) {
+      if (value === undefined) {
+        delete process.env[key]
+      } else {
+        process.env[key] = value
+      }
+    }
+  }
+})
