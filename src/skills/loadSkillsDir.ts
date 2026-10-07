@@ -1,6 +1,7 @@
 import { realpath } from 'fs/promises'
 import ignore from 'ignore'
 import memoize from 'lodash-es/memoize.js'
+import { homedir } from 'node:os'
 import {
   basename,
   dirname,
@@ -102,6 +103,19 @@ export function getProjectSkillsPaths(dir: string): string[] {
 
 function prefersOpenClaudeConfigDir(path: string): number {
   return path.split(pathSep).includes('.openclaude') ? 0 : 1
+}
+
+// FORK: sibling-harness skills fallback. Skills load only from OpenClaude's
+// own config home, but users arriving from Claude Code / opencode keep skills
+// in ~/.claude/skills and ~/.agents/skills, leaving them invisible to
+// discovery. These dirs are read-only fallbacks slotted last in precedence:
+// every native source wins, and same-named skills resolve first-wins with a
+// debug log naming the winning home.
+export function getSiblingSkillsDirs(homeDir: string = homedir()): string[] {
+  return [
+    join(homeDir, '.claude', 'skills'),
+    join(homeDir, '.agents', 'skills'),
+  ]
 }
 
 function compareSkillDirPrecedence(a: string, b: string): number {
@@ -781,14 +795,23 @@ export const getSkillDirCommands = memoize(
       'skills',
       cwd,
     ).sort(compareSkillDirPrecedence)
+    // FORK: sibling-harness fallback dirs (read-only, never written to).
+    // Skipped when one coincides with the own user dir (e.g. config home
+    // pointed at ~/.claude) — file-identity dedup would catch it, but an
+    // explicit skip keeps the debug output honest.
+    const siblingSkillsDirs = getSiblingSkillsDirs().filter(
+      dir => relative(userSkillsDir, dir) !== '',
+    )
 
     logForDebugging(
-      `Loading skills from: managed=${managedSkillsDir}, user=${userSkillsDir}, project=[${projectSkillsDirs.join(', ')}]`,
+      `Loading skills from: managed=${managedSkillsDir}, user=${userSkillsDir}, project=[${projectSkillsDirs.join(', ')}], sibling=[${siblingSkillsDirs.join(', ')}]`,
     )
 
     // Load from additional directories (--add-dir)
     const additionalDirs = getAdditionalDirectoriesForClaudeMd()
     const skillsLocked = isRestrictedToPluginOnly('skills')
+    const userSkillsEnabled =
+      isSettingSourceEnabled('userSettings') && !skillsLocked
     const projectSettingsEnabled =
       isSettingSourceEnabled('projectSettings') && !skillsLocked
 
@@ -820,12 +843,13 @@ export const getSkillDirCommands = memoize(
       userSkills,
       projectSkillsNested,
       additionalSkillsNested,
+      siblingSkillsNested,
       legacyCommands,
     ] = await Promise.all([
       isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_POLICY_SKILLS)
         ? Promise.resolve([])
         : loadSkillsFromSkillsDir(managedSkillsDir, 'policySettings'),
-      isSettingSourceEnabled('userSettings') && !skillsLocked
+      userSkillsEnabled
         ? loadSkillsFromSkillsDir(userSkillsDir, 'userSettings')
         : Promise.resolve([]),
       projectSettingsEnabled
@@ -843,6 +867,16 @@ export const getSkillDirCommands = memoize(
               .map(dir => loadSkillsFromSkillsDir(dir, 'projectSettings')),
           )
         : Promise.resolve([]),
+      // FORK: sibling-harness fallback loads with the user-level gate (these
+      // are user skills from another home) and stays out of --bare mode,
+      // which loads explicit --add-dir paths only.
+      userSkillsEnabled
+        ? Promise.all(
+            siblingSkillsDirs.map(dir =>
+              loadSkillsFromSkillsDir(dir, 'userSettings'),
+            ),
+          )
+        : Promise.resolve([]),
       // Legacy commands-as-skills goes through markdownConfigLoader with
       // subdir='commands', which our agents-only guard there skips. Block
       // here when skills are locked — these ARE skills, regardless of the
@@ -850,13 +884,15 @@ export const getSkillDirCommands = memoize(
       skillsLocked ? Promise.resolve([]) : loadSkillsFromCommandsDir(cwd),
     ])
 
-    // Flatten and combine all skills
+    // Flatten and combine all skills (FORK: sibling fallbacks appended last
+    // so every native source wins name collisions below).
     const allSkillsWithPaths = [
       ...managedSkills,
       ...projectSkillsNested.flat(),
       ...additionalSkillsNested.flat(),
       ...userSkills,
       ...legacyCommands,
+      ...siblingSkillsNested.flat(),
     ]
 
     // Deduplicate by resolved path (handles symlinks and duplicate parent directories)
@@ -874,12 +910,31 @@ export const getSkillDirCommands = memoize(
       string,
       SettingSource | 'builtin' | 'mcp' | 'plugin' | 'bundled'
     >()
+    // FORK: file-identity dedup above cannot see same-name/different-file
+    // collisions across homes (e.g. `framer` in both ~/.claude/skills and
+    // ~/.agents/skills). Sibling entries appended last lose to any earlier
+    // same-named skill from a native source.
+    const siblingSkillPaths = new Set(
+      siblingSkillsNested.flat().map(({ filePath }) => filePath),
+    )
+    const seenSkillNames = new Set<string>()
     const deduplicatedSkills: Command[] = []
 
     for (let i = 0; i < allSkillsWithPaths.length; i++) {
       const entry = allSkillsWithPaths[i]
       if (entry === undefined || entry.skill.type !== 'prompt') continue
       const { skill } = entry
+
+      if (
+        siblingSkillPaths.has(entry.filePath) &&
+        seenSkillNames.has(skill.name)
+      ) {
+        logForDebugging(
+          `Skipping sibling skill '${skill.name}' at ${entry.filePath} (shadowed by same-named skill from a native source)`,
+        )
+        continue
+      }
+      seenSkillNames.add(skill.name)
 
       const fileId = fileIds[i]
       if (fileId === null || fileId === undefined) {
@@ -933,7 +988,7 @@ export const getSkillDirCommands = memoize(
     }
 
     logForDebugging(
-      `Loaded ${deduplicatedSkills.length} unique skills (${unconditionalSkills.length} unconditional, ${newConditionalSkills.length} conditional, managed: ${managedSkills.length}, user: ${userSkills.length}, project: ${projectSkillsNested.flat().length}, additional: ${additionalSkillsNested.flat().length}, legacy commands: ${legacyCommands.length})`,
+      `Loaded ${deduplicatedSkills.length} unique skills (${unconditionalSkills.length} unconditional, ${newConditionalSkills.length} conditional, managed: ${managedSkills.length}, user: ${userSkills.length}, project: ${projectSkillsNested.flat().length}, additional: ${additionalSkillsNested.flat().length}, sibling: ${siblingSkillsNested.flat().length}, legacy commands: ${legacyCommands.length})`,
     )
 
     return unconditionalSkills
