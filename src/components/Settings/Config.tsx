@@ -7,7 +7,7 @@ import * as React from 'react';
 import { useState, useCallback } from 'react';
 import { useKeybinding, useKeybindings } from '../../keybindings/useKeybinding.js';
 import figures from 'figures';
-import { type GlobalConfig, saveGlobalConfig, getCurrentProjectConfig, type OutputStyle, MAX_MESSAGES_COMPACTION_THRESHOLDS, normalizeMaxMessagesCompactionThreshold } from '../../utils/config.js';
+import { type GlobalConfig, saveGlobalConfig, getCurrentProjectConfig, type OutputStyle, MAX_MESSAGES_COMPACTION_THRESHOLDS, normalizeMaxMessagesCompactionThreshold, AUTO_COMPACT_TOKEN_PERCENTS, normalizeAutoCompactTokenPercent } from '../../utils/config.js';
 import { normalizeApiKeyForConfig } from '../../utils/authPortable.js';
 import { getGlobalConfig, getAutoUpdaterDisabledReason, formatAutoUpdaterDisabledReason, getRemoteControlAtStartup } from '../../utils/config.js';
 import { normalizeCompactTailTurns } from '../../utils/relevancePruning.js';
@@ -313,6 +313,29 @@ export function Config({
       });
       logEvent('tengu_max_messages_compaction_threshold_changed', {
         threshold: normalizedThreshold as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+      });
+    }
+  }, {
+    id: 'autoCompactTokenPercent',
+    label: 'Token-percent compaction',
+    value: normalizeAutoCompactTokenPercent(globalConfig.autoCompactTokenPercent),
+    // Include a hand-edited config value so it round-trips through the picker
+    // instead of wrapping to 'off' (same pattern as compactTailTurns). Any
+    // integer 1-99 works via settings.json hand-edit; presets are quick-picks.
+    options: [...new Set([...AUTO_COMPACT_TOKEN_PERCENTS, normalizeAutoCompactTokenPercent(globalConfig.autoCompactTokenPercent)])],
+    type: 'enum' as const,
+    onChange(autoCompactTokenPercent: string) {
+      const normalizedPercent = normalizeAutoCompactTokenPercent(autoCompactTokenPercent);
+      saveGlobalConfig(current => ({
+        ...current,
+        autoCompactTokenPercent: normalizedPercent
+      }));
+      setGlobalConfig({
+        ...getGlobalConfig(),
+        autoCompactTokenPercent: normalizedPercent
+      });
+      logEvent('tengu_auto_compact_token_percent_changed', {
+        percent: normalizedPercent as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
       });
     }
   }, {
@@ -1303,6 +1326,10 @@ export function Config({
     if (globalConfig.maxMessagesCompactionThreshold !== initialConfig.current.maxMessagesCompactionThreshold) {
       const threshold = normalizeMaxMessagesCompactionThreshold(globalConfig.maxMessagesCompactionThreshold);
       formattedChanges.push(threshold === 'off' ? 'Disabled message-count compaction' : `Set message-count compaction to ${threshold}`);
+    }
+    if (globalConfig.autoCompactTokenPercent !== initialConfig.current.autoCompactTokenPercent) {
+      const percent = normalizeAutoCompactTokenPercent(globalConfig.autoCompactTokenPercent);
+      formattedChanges.push(percent === 'off' ? 'Disabled token-percent compaction' : `Set token-percent compaction to ${percent}% (fires earlier only, never later)`);
     }
     if (globalConfig.compactTailTurns !== initialConfig.current.compactTailTurns) {
       formattedChanges.push(`Set compaction recent messages kept to ${normalizeCompactTailTurns(globalConfig.compactTailTurns)}`);

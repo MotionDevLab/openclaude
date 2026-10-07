@@ -252,6 +252,69 @@ export function normalizeMaxMessagesCompactionThreshold(
   return String(parsed)
 }
 
+export const AUTO_COMPACT_TOKEN_PERCENTS = [
+  'off',
+  '50',
+  '55',
+  '60',
+  '65',
+  '70',
+  '75',
+  '80',
+  '85',
+  '90',
+] as const
+// FORK: PR-B settable token-% trigger. The persisted type accepts any integer
+// 1-99 string (exact values via settings.json hand-edit, e.g. '73'); the
+// preset const above stays as the single source of truth for the /config
+// quick-picks, with the persisted value round-tripping through the picker
+// (same pattern as compactTailTurns) so custom values don't wrap to 'off'.
+export type AutoCompactTokenPercent =
+  | (typeof AUTO_COMPACT_TOKEN_PERCENTS)[number]
+  | (string & {})
+
+const AUTO_COMPACT_TOKEN_PERCENT_PATTERN = /^\d+$/
+
+export function isValidAutoCompactTokenPercent(
+  value: unknown,
+): value is AutoCompactTokenPercent {
+  if (value === 'off') {
+    return true
+  }
+  if (typeof value !== 'string') {
+    return false
+  }
+  // FORK: accept any integer 1-99 string, not just the UI presets.
+  const trimmed = value.trim()
+  if (!AUTO_COMPACT_TOKEN_PERCENT_PATTERN.test(trimmed)) {
+    return false
+  }
+  const parsed = Number.parseInt(trimmed, 10)
+  return Number.isSafeInteger(parsed) && parsed >= 1 && parsed <= 99
+}
+
+export function normalizeAutoCompactTokenPercent(
+  value: unknown,
+): AutoCompactTokenPercent {
+  if (value === 'off') {
+    return 'off'
+  }
+  if (typeof value !== 'string') {
+    return 'off'
+  }
+  const trimmed = value.trim()
+  if (!AUTO_COMPACT_TOKEN_PERCENT_PATTERN.test(trimmed)) {
+    return 'off'
+  }
+  const parsed = Number.parseInt(trimmed, 10)
+  // FORK: out-of-range values fall back to 'off' (fall through to buffer
+  // math) — a bad percent must never silently change compaction behavior.
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 99) {
+    return 'off'
+  }
+  return String(parsed)
+}
+
 export type OutputStyle = string
 
 export type Providers = string
@@ -742,6 +805,19 @@ export type GlobalConfig = {
   // chosen threshold, regardless of token usage.
   maxMessagesCompactionThreshold?: MaxMessagesCompactionThreshold
 
+  // Token-percent-based compaction threshold. Set via /config (presets) or
+  // settings.json hand-edit (any integer 1-99 string, e.g. '73').
+  // 'off'/unset = current buffer behavior. Otherwise compaction fires when
+  // token usage reaches this percent of the effective window — but ONLY
+  // earlier than the buffer threshold (min semantics): it can never delay
+  // compaction past the buffer, which reserves room for the summary call.
+  // An explicit setting takes precedence over the legacy
+  // CLAUDE_AUTOCOMPACT_PCT_OVERRIDE env var entirely (the env var is only
+  // read when no valid setting is present).
+  // Opt-in cost note: moving compaction earlier means more summary calls
+  // against the lane's rate limit — continuity vs call budget.
+  autoCompactTokenPercent?: AutoCompactTokenPercent
+
   // Use a different (e.g. cheaper/faster) model for compaction.
   // Defaults to mainLoopModel when unset.
   compactModel?: string
@@ -857,6 +933,7 @@ export const GLOBAL_CONFIG_KEYS = [
   'knowledgeGraphEnabled',
   'logoColor',
   'maxMessagesCompactionThreshold',
+  'autoCompactTokenPercent',
   'compactModel',
 ] as const
 
@@ -1212,10 +1289,19 @@ registerCleanup(async () => {
  * @internal
  */
 function migrateConfigFields(config: GlobalConfig): GlobalConfig {
-  const { maxMessagesCompactionThreshold, ...restConfig } = config
+  const {
+    maxMessagesCompactionThreshold,
+    autoCompactTokenPercent,
+    ...restConfig
+  } = config
   const hasValidMaxMessagesCompactionThreshold =
     maxMessagesCompactionThreshold !== undefined &&
     isValidMaxMessagesCompactionThreshold(maxMessagesCompactionThreshold)
+  // FORK (PR-B): invalid percents are dropped (fall through to buffer math),
+  // never reset — a bad percent must not silently change behavior.
+  const hasValidAutoCompactTokenPercent =
+    autoCompactTokenPercent !== undefined &&
+    isValidAutoCompactTokenPercent(autoCompactTokenPercent)
   const normalizedConfig = {
     ...restConfig,
     ...(!hasValidMaxMessagesCompactionThreshold
@@ -1225,6 +1311,13 @@ function migrateConfigFields(config: GlobalConfig): GlobalConfig {
             normalizeMaxMessagesCompactionThreshold(
               maxMessagesCompactionThreshold,
             ),
+        }),
+    ...(!hasValidAutoCompactTokenPercent
+      ? {}
+      : {
+          autoCompactTokenPercent: normalizeAutoCompactTokenPercent(
+            autoCompactTokenPercent,
+          ),
         }),
   }
 

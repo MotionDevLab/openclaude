@@ -4,7 +4,7 @@ import { getSdkBetas } from '../../bootstrap/state.js'
 import type { QuerySource } from '../../constants/querySource.js'
 import type { ToolUseContext } from '../../Tool.js'
 import type { Message } from '../../types/message.js'
-import { getGlobalConfig } from '../../utils/config.js'
+import { getGlobalConfig, normalizeAutoCompactTokenPercent } from '../../utils/config.js'
 import {
   getContextWindowForModel,
   getSessionContextWindowOverride,
@@ -228,15 +228,30 @@ export function getAutoCompactThreshold(model: string): number {
   const autocompactThreshold = effectiveContextWindow - buffer
 
   // Override for easier testing of autocompact
-  const envPercent = process.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE
-  if (envPercent) {
-    const parsed = parseFloat(envPercent)
-    if (!isNaN(parsed) && parsed > 0 && parsed <= 100) {
-      const percentageThreshold = Math.floor(
-        effectiveContextWindow * (parsed / 100),
-      )
-      return Math.min(percentageThreshold, autocompactThreshold)
+  // FORK (PR-B): explicit percent setting first, legacy env override second
+  // (unchanged behavior), buffer math otherwise untouched. min() locks the
+  // dial to firing EARLIER only — it can never delay compaction past the
+  // buffer threshold, which reserves room for the summary call itself.
+  const configuredPercent = normalizeAutoCompactTokenPercent(
+    getGlobalConfig().autoCompactTokenPercent,
+  )
+  let percent: number | undefined
+  if (configuredPercent !== 'off') {
+    percent = Number.parseInt(configuredPercent, 10)
+  } else {
+    const envPercent = process.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE
+    if (envPercent) {
+      const parsed = parseFloat(envPercent)
+      if (!isNaN(parsed) && parsed > 0 && parsed <= 100) {
+        percent = parsed
+      }
     }
+  }
+  if (percent !== undefined) {
+    const percentageThreshold = Math.floor(
+      effectiveContextWindow * (percent / 100),
+    )
+    return Math.min(percentageThreshold, autocompactThreshold)
   }
 
   return autocompactThreshold

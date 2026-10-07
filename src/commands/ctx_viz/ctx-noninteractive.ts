@@ -10,6 +10,8 @@ import type { AgentDefinitionsResult } from '../../tools/AgentTool/loadAgentsDir
 import type { Message } from '../../types/message.js'
 import { analyzeContextUsage, type ContextData } from '../../utils/analyzeContext.js'
 import { getContextWindowForModel, getModelMaxOutputTokens, OPENAI_FALLBACK_CONTEXT_WINDOW } from '../../utils/context.js'
+import { getGlobalConfig, normalizeMaxMessagesCompactionThreshold } from '../../utils/config.js'
+import { resolveMaxActiveMessagesLimit } from '../../utils/maxActiveMessages.js'
 import { formatNumber, formatDuration } from '../../utils/format.js'
 import { getMessagesAfterCompactBoundary } from '../../utils/messages.js'
 import { getCanonicalName } from '../../utils/model/model.js'
@@ -55,6 +57,9 @@ export async function collectCtxData(context: CtxDataInput): Promise<{
   contextWindow: number
   effectiveContext: number
   autoCompactThreshold: number
+  // FORK (PR-B): live message-count dial, paired with the token threshold
+  // above so tuning is done with numbers visible, not blind.
+  maxMessagesLimit: number | 'off'
   maxOutput: { default: number; upperLimit: number }
   canonicalName: string
   autoCompactEnabled: boolean
@@ -93,11 +98,26 @@ export async function collectCtxData(context: CtxDataInput): Promise<{
 
   const model = mainLoopModel
 
+  // Mirror the query-loop resolution (query.ts): normalized setting, legacy
+  // env hatch, hard-cap clamp. 'off' with no env hatch means disabled.
+  const normalizedMessageSetting = normalizeMaxMessagesCompactionThreshold(
+    getGlobalConfig().maxMessagesCompactionThreshold,
+  )
+  const maxMessagesLimit: number | 'off' =
+    normalizedMessageSetting === 'off' &&
+    !process.env.OPENCLAUDE_MAX_ACTIVE_MESSAGES
+      ? 'off'
+      : resolveMaxActiveMessagesLimit(
+          normalizedMessageSetting,
+          process.env.OPENCLAUDE_MAX_ACTIVE_MESSAGES,
+        )
+
   return {
     contextData,
     contextWindow: getContextWindowForModel(model, getSdkBetas()),
     effectiveContext: getEffectiveContextWindowSize(model),
     autoCompactThreshold: getAutoCompactThreshold(model),
+    maxMessagesLimit,
     maxOutput: getModelMaxOutputTokens(model),
     canonicalName: getCanonicalName(model),
     autoCompactEnabled: isAutoCompactEnabled(),
@@ -164,6 +184,7 @@ export function renderCtxReport(d: RenderInput): string {
   if (d.autoCompactEnabled) {
     lines.push(`    ${figures.bullet} Auto-compact at:    ${chalk.bold(formatNumber(d.autoCompactThreshold))} tokens`)
   }
+  lines.push(`    ${figures.bullet} Message-count at:   ${d.maxMessagesLimit === 'off' ? chalk.bold('off') : `${chalk.bold(formatNumber(d.maxMessagesLimit))} messages`}`)
   if (d.contextWindow === OPENAI_FALLBACK_CONTEXT_WINDOW) {
     lines.push(`    ${figures.bullet} Source:            ${chalk.yellow('fallback 128k — set modelLimits / env prefix / lane contextWindow / /set-context-window')}`)
   }

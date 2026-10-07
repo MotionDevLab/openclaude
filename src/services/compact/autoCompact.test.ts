@@ -35,6 +35,7 @@ let hasSharedMutationLock = false
 
 type ImportAutoCompactOptions = {
   autoCompactEnabled?: boolean
+  autoCompactTokenPercent?: string
   compactConversation?: ReturnType<typeof mock>
   trySessionMemoryCompaction?: ReturnType<typeof mock>
 }
@@ -49,6 +50,7 @@ async function importAutoCompact(options: ImportAutoCompactOptions = {}) {
     ...realConfig,
     getGlobalConfig: () => ({
       autoCompactEnabled: options.autoCompactEnabled ?? true,
+      autoCompactTokenPercent: options.autoCompactTokenPercent,
     }),
   }))
   if (options.compactConversation) {
@@ -1060,5 +1062,169 @@ describe('message-count vs token threshold disambiguation', () => {
     expect(
       await shouldAutoCompact(tiny, 'claude-sonnet-4', 'repl_main_thread'),
     ).toBe(false)
+  })
+})
+
+describe('autoCompactTokenPercent setting (PR-B)', () => {
+  test('setting 70 on a 1M window fires at ~690k, not the buffer threshold', async () => {
+    process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = '20000'
+    delete process.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE
+    const { getAutoCompactThreshold } = await importAutoCompact({
+      autoCompactTokenPercent: '70',
+    })
+    realContext.setSessionContextWindowOverride('claude-sonnet-4', 1_000_000)
+
+    try {
+      // Effective window is 980k; 70% floors to 686k, buffer gives 950k.
+      expect(getAutoCompactThreshold('claude-sonnet-4')).toBe(686_000)
+    } finally {
+      realContext.clearSessionContextWindowOverride('claude-sonnet-4')
+      restoreEnv()
+    }
+  })
+
+  test('exact custom values work, not just tens digits', async () => {
+    process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = '20000'
+    delete process.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE
+    const { getAutoCompactThreshold } = await importAutoCompact({
+      autoCompactTokenPercent: '73',
+    })
+    realContext.setSessionContextWindowOverride('claude-sonnet-4', 1_000_000)
+
+    try {
+      expect(getAutoCompactThreshold('claude-sonnet-4')).toBe(715_400)
+    } finally {
+      realContext.clearSessionContextWindowOverride('claude-sonnet-4')
+      restoreEnv()
+    }
+  })
+
+  test('setting 99 on a 200k window still returns the buffer threshold (min lock)', async () => {
+    process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW = '200000'
+    process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = '20000'
+    delete process.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE
+    const { getAutoCompactThreshold } = await importAutoCompact({
+      autoCompactTokenPercent: '99',
+    })
+
+    try {
+      // Effective window is 180k; 99% is 178.2k but the buffer gives 150k.
+      expect(getAutoCompactThreshold('claude-sonnet-4')).toBe(150_000)
+    } finally {
+      restoreEnv()
+    }
+  })
+
+  test('unset or off falls back to buffer math', async () => {
+    process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = '20000'
+    delete process.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE
+    realContext.setSessionContextWindowOverride('claude-sonnet-4', 1_000_000)
+
+    try {
+      const { getAutoCompactThreshold: unsetThreshold } =
+        await importAutoCompact()
+      expect(unsetThreshold('claude-sonnet-4')).toBe(950_000)
+      const { getAutoCompactThreshold: offThreshold } =
+        await importAutoCompact({ autoCompactTokenPercent: 'off' })
+      expect(offThreshold('claude-sonnet-4')).toBe(950_000)
+    } finally {
+      realContext.clearSessionContextWindowOverride('claude-sonnet-4')
+      restoreEnv()
+    }
+  })
+
+  test('invalid setting values are ignored (fall through to buffer math)', async () => {
+    process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = '20000'
+    delete process.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE
+    const { getAutoCompactThreshold } = await importAutoCompact({
+      autoCompactTokenPercent: 'banana',
+    })
+    realContext.setSessionContextWindowOverride('claude-sonnet-4', 1_000_000)
+
+    try {
+      expect(getAutoCompactThreshold('claude-sonnet-4')).toBe(950_000)
+    } finally {
+      realContext.clearSessionContextWindowOverride('claude-sonnet-4')
+      restoreEnv()
+    }
+  })
+
+  test('legacy env override still applies when the setting is unset', async () => {
+    process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = '20000'
+    process.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = '70'
+    const { getAutoCompactThreshold } = await importAutoCompact()
+    realContext.setSessionContextWindowOverride('claude-sonnet-4', 1_000_000)
+
+    try {
+      expect(getAutoCompactThreshold('claude-sonnet-4')).toBe(686_000)
+    } finally {
+      realContext.clearSessionContextWindowOverride('claude-sonnet-4')
+      restoreEnv()
+    }
+  })
+
+  test('an explicit setting beats the legacy env override', async () => {
+    process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = '20000'
+    process.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = '50'
+    const { getAutoCompactThreshold } = await importAutoCompact({
+      autoCompactTokenPercent: '90',
+    })
+    realContext.setSessionContextWindowOverride('claude-sonnet-4', 1_000_000)
+
+    try {
+      // 90% of 980k floors to 882k; the env 50% (490k) is ignored.
+      expect(getAutoCompactThreshold('claude-sonnet-4')).toBe(882_000)
+    } finally {
+      realContext.clearSessionContextWindowOverride('claude-sonnet-4')
+      restoreEnv()
+    }
+  })
+
+  test('percent dial composes with the graduated buffer on small windows', async () => {
+    process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW = '64000'
+    process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = '20000'
+    delete process.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE
+    const { getAutoCompactThreshold } = await importAutoCompact({
+      autoCompactTokenPercent: '50',
+    })
+
+    try {
+      // Effective window is 44k; 50% is 22k, buffer threshold is 30k.
+      expect(getAutoCompactThreshold('claude-sonnet-4')).toBe(22_000)
+    } finally {
+      restoreEnv()
+    }
+  })
+
+  test('invalid setting falls through to a valid env override', async () => {
+    process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = '20000'
+    process.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = '50'
+    const { getAutoCompactThreshold } = await importAutoCompact({
+      autoCompactTokenPercent: 'banana',
+    })
+    realContext.setSessionContextWindowOverride('claude-sonnet-4', 1_000_000)
+
+    try {
+      expect(getAutoCompactThreshold('claude-sonnet-4')).toBe(490_000)
+    } finally {
+      realContext.clearSessionContextWindowOverride('claude-sonnet-4')
+      restoreEnv()
+    }
+  })
+
+  test('invalid env override falls through when the setting is valid', async () => {
+    process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = '20000'
+    process.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = 'banana'
+    const { getAutoCompactThreshold } = await importAutoCompact({
+      autoCompactTokenPercent: '70',
+    })
+    realContext.setSessionContextWindowOverride('claude-sonnet-4', 1_000_000)
+
+    try {
+      expect(getAutoCompactThreshold('claude-sonnet-4')).toBe(686_000)
+    } finally {
+      realContext.clearSessionContextWindowOverride('claude-sonnet-4')
+      restoreEnv()
+    }
   })
 })

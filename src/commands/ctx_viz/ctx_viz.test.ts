@@ -194,6 +194,7 @@ describe('/ctx command surface (PR #1610)', () => {
       contextWindow: 200_000,
       effectiveContext: 180_000,
       autoCompactThreshold: 167_000,
+      maxMessagesLimit: 200,
       maxOutput: { default: 32_000, upperLimit: 64_000 },
       canonicalName: 'claude-sonnet-4',
       autoCompactEnabled: true,
@@ -219,6 +220,9 @@ describe('/ctx command surface (PR #1610)', () => {
     // Auto-compact line is rendered because the fixture sets
     // isAutoCompactEnabled: true.
     expect(out).toContain('Auto-compact at:')
+    // Message-count dial line always renders with the live limit.
+    expect(out).toContain('Message-count at:')
+    expect(out).toContain('200 messages')
     // Current Context block + total.
     expect(out).toContain('Current Context (what the model sees)')
     expect(out).toContain('Total:')
@@ -273,6 +277,7 @@ function fakeRenderInput(window: number): RenderInput {
     contextWindow: window,
     effectiveContext: window - 20000,
     autoCompactThreshold: window - 50000,
+    maxMessagesLimit: 'off',
     maxOutput: { default: 32000, upperLimit: 64000 },
     canonicalName: 'test-model',
     autoCompactEnabled: true,
@@ -296,5 +301,10 @@ describe('ctx-viz fallback source flag', () => {
     expect(fallbackOut).toContain('fallback')
     const realOut = renderCtxReport(fakeRenderInput(1000000))
     expect(realOut).not.toContain('Source:')
+  })
+
+  test('message-count dial renders the off state', () => {
+    const out = renderCtxReport(fakeRenderInput(1000000))
+    expect(out).toContain('Message-count at:')
   })
 })
