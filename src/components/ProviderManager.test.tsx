@@ -6062,6 +6062,14 @@ test('ProviderManager switches back to Anthropic via the manager UI: resets the 
       getProviderProfiles: () => [],
       getActiveProviderProfile: () => null,
     })
+    // Isolate from real user settings: lanes defined in the local settings
+    // file would otherwise leak into the option list and the 'j' navigation
+    // below would land on the wrong entry. In-memory override only, restored
+    // in finally — the settings file itself is never touched.
+    mock.module('../utils/customProviders.js', () => ({
+      ...actualCustomProvidersModule,
+      getCustomProvidersFromSettings: () => [],
+    }))
 
     const clearActiveProviderProfile = mock(() => {
       for (const key of Object.keys(process.env)) {
@@ -6186,6 +6194,7 @@ test('ProviderManager switches back to Anthropic via the manager UI: resets the 
     if (mounted) {
       await mounted.dispose()
     }
+    restoreCustomLaneEntries()
     for (const [key, value] of envSnapshot) {
       if (value === undefined) {
         delete process.env[key]
