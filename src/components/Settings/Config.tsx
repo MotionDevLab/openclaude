@@ -317,7 +317,7 @@ export function Config({
     }
   }, {
     id: 'autoCompactTokenPercent',
-    label: 'Token-percent compaction (fires earlier only)',
+    label: 'Token-percent compaction',
     value: normalizeAutoCompactTokenPercent(globalConfig.autoCompactTokenPercent),
     // Include a hand-edited config value so it round-trips through the picker
     // instead of wrapping to 'off' (same pattern as compactTailTurns). Any
