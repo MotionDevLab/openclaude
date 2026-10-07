@@ -10,8 +10,9 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
+import * as realOs from 'node:os'
 import { join } from 'node:path'
-import { test } from 'bun:test'
+import { mock, test } from 'bun:test'
 
 import {
   enableUserAndProjectSettingSources,
@@ -35,6 +36,7 @@ import { resetSettingsCache } from '../utils/settings/settingsCache.ts'
 import {
   clearDynamicSkills,
   clearSkillCaches,
+  getSiblingSkillsDirs,
   getSkillDirCommands,
   getProjectSkillsPaths,
 } from './loadSkillsDir.ts'
@@ -379,4 +381,135 @@ test.serial('dynamic discovery checks .openclaude skill directories', async () =
       releaseSharedMutationLock()
     }
   }
+})
+
+function writeHomeSkill(
+  homeDir: string,
+  homeName: '.claude' | '.agents',
+  skillPath: string,
+  description = skillPath,
+): void {
+  const skillDir = join(homeDir, homeName, 'skills', ...skillPath.split('/'))
+  mkdirSync(skillDir, { recursive: true })
+  writeFileSync(
+    join(skillDir, 'SKILL.md'),
+    `---\ndescription: ${description}\n---\n# ${skillPath}\n`,
+    'utf8',
+  )
+}
+
+async function withSiblingHarness(
+  fn: (dirs: {
+    configDir: string
+    cwd: string
+    fakeHome: string
+  }) => Promise<void>,
+): Promise<void> {
+  await acquireSharedMutationLock('loadSkillsDir.test.ts')
+  const configDir = mkdtempSync(join(tmpdir(), 'openclaude-skills-'))
+  const cwd = join(configDir, 'workspace')
+  const fakeHome = mkdtempSync(join(tmpdir(), 'openclaude-fakehome-'))
+  const originalConfigDir = {
+    openClaudeConfigDir: process.env.OPENCLAUDE_CONFIG_DIR,
+    claudeConfigDir: process.env.CLAUDE_CONFIG_DIR,
+    configHomeOverride: getClaudeConfigHomeDirOverrideForTesting(),
+  }
+  const originalSettingsState = enableUserAndProjectSettingSources()
+  const originalFs = setRealFilesystemForTest()
+  mock.module('node:os', () => ({ ...realOs, homedir: () => fakeHome }))
+
+  try {
+    mkdirSync(cwd, { recursive: true })
+    setConfigDirEnv(configDir)
+    clearSkillAndConfigCaches()
+    await fn({ configDir, cwd, fakeHome })
+  } finally {
+    try {
+      mock.module('node:os', () => realOs)
+      restoreConfigDirEnv(originalConfigDir)
+      setFsImplementation(originalFs)
+      restoreSettingState(originalSettingsState)
+      clearSkillAndConfigCaches()
+      rmSync(configDir, { recursive: true, force: true })
+      rmSync(fakeHome, { recursive: true, force: true })
+    } finally {
+      releaseSharedMutationLock()
+    }
+  }
+}
+
+test.serial('sibling homes resolve to .claude then .agents skills dirs', () => {
+  assert.deepEqual(getSiblingSkillsDirs('/fake/home'), [
+    join('/fake/home', '.claude', 'skills'),
+    join('/fake/home', '.agents', 'skills'),
+  ])
+})
+
+test.serial('discovers skills from sibling homes when own user dir is empty', async () => {
+  await withSiblingHarness(async ({ cwd, fakeHome }) => {
+    writeHomeSkill(fakeHome, '.claude', 'sib-claude-probe')
+    writeHomeSkill(fakeHome, '.agents', 'sib-agents-probe')
+
+    const skills = await getSkillDirCommands(cwd)
+    const names = skills
+      .filter(
+        skill =>
+          isPromptSkillNamed(skill, 'sib-claude-probe') ||
+          isPromptSkillNamed(skill, 'sib-agents-probe'),
+      )
+      .map(skill => {
+        assert.equal(skill.type, 'prompt')
+        return skill.type === 'prompt' ? skill.name : ''
+      })
+      .sort()
+
+    assert.deepEqual(names, ['sib-agents-probe', 'sib-claude-probe'])
+  })
+})
+
+test.serial('own user skill shadows same-named sibling skill', async () => {
+  await withSiblingHarness(async ({ cwd, fakeHome }) => {
+    writeUserSkill(getClaudeConfigHomeDir(), 'shared-shadow', 'user copy')
+    writeHomeSkill(fakeHome, '.claude', 'shared-shadow', 'sibling copy')
+    writeHomeSkill(fakeHome, '.agents', 'shared-shadow', 'agents copy')
+
+    const matches = (await getSkillDirCommands(cwd)).filter(skill =>
+      isPromptSkillNamed(skill, 'shared-shadow'),
+    )
+
+    assert.equal(matches.length, 1)
+    assert.equal(matches[0]?.type, 'prompt')
+    assert.equal(
+      matches[0]?.type === 'prompt' ? matches[0].description : '',
+      'user copy',
+    )
+  })
+})
+
+test.serial('.claude sibling wins over .agents sibling on name collision', async () => {
+  await withSiblingHarness(async ({ cwd, fakeHome }) => {
+    writeHomeSkill(fakeHome, '.agents', 'shared-sibling', 'agents copy')
+    writeHomeSkill(fakeHome, '.claude', 'shared-sibling', 'claude copy')
+
+    const matches = (await getSkillDirCommands(cwd)).filter(skill =>
+      isPromptSkillNamed(skill, 'shared-sibling'),
+    )
+
+    assert.equal(matches.length, 1)
+    assert.equal(
+      matches[0]?.type === 'prompt' ? matches[0].description : '',
+      'claude copy',
+    )
+  })
+})
+
+test.serial('missing sibling dirs are skipped without error', async () => {
+  await withSiblingHarness(async ({ cwd }) => {
+    writeUserSkill(getClaudeConfigHomeDir(), 'lone-user-skill')
+
+    const skills = await getSkillDirCommands(cwd)
+    assert.ok(
+      skills.some(skill => isPromptSkillNamed(skill, 'lone-user-skill')),
+    )
+  })
 })
