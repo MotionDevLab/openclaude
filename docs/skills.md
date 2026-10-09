@@ -1,6 +1,6 @@
 # Skills
 
-A skill is a folder with a `SKILL.md` file. OpenClaude loads every skill it finds in the project's `.openclaude/skills` directory and in your user skills directory at start, and the model can invoke them by name. This guide covers the `openclaude skills` commands, what each install path checks, and how to keep checking installed skills after that.
+A skill is a folder with a `SKILL.md` file. OpenClaude loads every skill it finds in the project's `.openclaude/skills` directory and in your user skills directory at start, and the model can invoke them by name. As a read-only fallback it also scans the sibling harnesses sharing your home directory, `~/.claude/skills` then `~/.agents/skills`, so skills you keep for other tools are visible here too. Fallback entries load last: every native source wins on name collisions (with `.claude` beating `.agents`), and the fallback is skipped when user settings are disabled, skills are locked, or `--bare` mode is on. This guide covers the `openclaude skills` commands, what each install path checks, and how to keep checking installed skills after that.
 
 ## Commands
 

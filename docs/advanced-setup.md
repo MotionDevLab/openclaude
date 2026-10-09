@@ -939,7 +939,22 @@ remains active when configured.
 The legacy `OPENCLAUDE_MAX_ACTIVE_MESSAGES` environment variable is honored
 when the setting is unset or `off`. An explicit numeric setting takes
 precedence over that legacy value. `OPENCLAUDE_MAX_ACTIVE_MESSAGES_HARD_CAP`
-can override the safety cap; set it to `0` only for diagnostics.
+can override the safety cap; set it to `0` only for diagnostics. Any positive
+integer also works via `maxMessagesCompactionThreshold` hand-edit in
+`settings.json`; custom values are clamped to the safety hard cap instead of
+being reset.
+
+### Token-percent compaction trigger
+
+`/config` also offers **Token-percent compaction**: compact once context usage
+reaches a set percentage of the effective window instead of waiting for the
+default buffer-based threshold. Presets run `50`–`90` in 5-point steps; any
+integer `1`–`99` works via `autoCompactTokenPercent` hand-edit in
+`settings.json` (custom values round-trip through the picker). The setting is
+min-only — it can fire compaction earlier, never later than the default
+threshold, which reserves room for the summary call itself. Default `off`; the
+legacy `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` environment override still applies
+when the setting is `off`.
 
 ### Long-session memory guard validation
 
