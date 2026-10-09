@@ -23,6 +23,11 @@ openclaude --version
 openclaude --help
 ```
 
+To pin a checkpoint release instead of floating `main`, replace
+`git checkout main` with `git checkout v0.31.0-fork.2` (see the Releases
+page for the current tag). Pinned checkouts update via `git fetch` plus a
+fresh `checkout` of the new tag, not `git pull`.
+
 ## Update to the latest fork code
 
 ```powershell
