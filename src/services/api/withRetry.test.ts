@@ -36,6 +36,7 @@ const envKeys = [
   'OPENAI_MODEL',
   'OPENAI_BASE_URL',
   'OPENAI_API_BASE',
+  'ANTHROPIC_BASE_URL',
 ] as const
 
 beforeEach(async () => {
@@ -686,6 +687,187 @@ describe('OpenAI-compatible retry classification', () => {
     expect(countdown).toBeDefined()
     expect(countdown?.retryAttempt).toBe(1)
     expect(countdown?.maxRetries).toBe(2)
+  })
+})
+
+describe('Native-path transient 403 retry (Zen volume gating)', () => {
+  // Mirror of the shim-path marker test above, for 403s that arrive via the
+  // native Anthropic client: no [openai_category] marker, SDK-prefixed
+  // message (`"403 " + JSON`), Zen route proven by env/header gate.
+  const ZEN_NATIVE_URL = 'https://opencode.ai/zen/v1/messages'
+
+  function makeNativeError(
+    status: number,
+    message: string,
+    headers: Record<string, string> = {},
+  ): APIError {
+    return APIError.generate(status, undefined, message, new Headers(headers))
+  }
+
+  function findCountdown(yielded: unknown[]) {
+    return yielded.find(
+      (message) =>
+        typeof message === 'object' &&
+        message !== null &&
+        (message as { type?: unknown }).type === 'system' &&
+        (message as { subtype?: unknown }).subtype === 'api_error',
+    ) as { retryAttempt?: unknown; maxRetries?: unknown } | undefined
+  }
+
+  async function runOnceThenSucceed(error: APIError) {
+    process.env.OPENCLAUDE_RETRY_DELAY_MS = '1'
+    const { withRetry } = await importFreshWithRetryModule('firstParty')
+    let attempts = 0
+    const yielded: unknown[] = []
+    const generator = withRetry(
+      async () => ({} as Anthropic),
+      async () => {
+        attempts++
+        if (attempts === 1) throw error
+        return { ok: true }
+      },
+      {
+        maxRetries: 2,
+        model: 'muse-spark-1.3-contributor-free',
+        thinkingConfig: { type: 'disabled' },
+      },
+    )
+    let result: unknown
+    while (true) {
+      const next = await generator.next()
+      if (next.done) {
+        result = next.value
+        break
+      }
+      yielded.push(next.value)
+    }
+    return { result, attempts, yielded }
+  }
+
+  async function runAlwaysFail(error: APIError) {
+    process.env.OPENCLAUDE_RETRY_DELAY_MS = '1'
+    const { CannotRetryError, withRetry } =
+      await importFreshWithRetryModule('firstParty')
+    let attempts = 0
+    let caught: unknown
+    try {
+      await drainAsyncGenerator(
+        withRetry(
+          async () => ({} as Anthropic),
+          async () => {
+            attempts++
+            throw error
+          },
+          {
+            maxRetries: 2,
+            model: 'muse-spark-1.3-contributor-free',
+            thinkingConfig: { type: 'disabled' },
+          },
+        ),
+      )
+    } catch (e) {
+      caught = e
+    }
+    expect(caught).toBeInstanceOf(CannotRetryError)
+    return { caught, attempts }
+  }
+
+  test('retries an empty-body native 403 on the Zen lane with a countdown', async () => {
+    process.env.ANTHROPIC_BASE_URL = ZEN_NATIVE_URL
+    const { result, attempts, yielded } = await runOnceThenSucceed(
+      makeNativeError(403, '403 '),
+    )
+    expect(result).toEqual({ ok: true })
+    expect(attempts).toBe(2)
+    const countdown = findCountdown(yielded)
+    expect(countdown).toBeDefined()
+    expect(countdown?.retryAttempt).toBe(1)
+    expect(countdown?.maxRetries).toBe(2)
+  })
+
+  test('retries a whitespace-body native 403 via the OPENAI_BASE_URL gate', async () => {
+    process.env.OPENAI_BASE_URL = ZEN_NATIVE_URL
+    const { result, attempts, yielded } = await runOnceThenSucceed(
+      makeNativeError(403, '403    '),
+    )
+    expect(result).toEqual({ ok: true })
+    expect(attempts).toBe(2)
+    expect(findCountdown(yielded)).toBeDefined()
+  })
+
+  test('retries a throttle-phrased native 403 via the request-url header gate', async () => {
+    const { result, attempts, yielded } = await runOnceThenSucceed(
+      makeNativeError(
+        403,
+        '403 {"type":"error","error":{"type":"throttled","message":"Please slow down and try again shortly."}}',
+        { 'x-opencode-request-url': ZEN_NATIVE_URL },
+      ),
+    )
+    expect(result).toEqual({ ok: true })
+    expect(attempts).toBe(2)
+    expect(findCountdown(yielded)).toBeDefined()
+  })
+
+  test('stays terminal on a forbidden-worded native 403 (attempts===1)', async () => {
+    process.env.ANTHROPIC_BASE_URL = ZEN_NATIVE_URL
+    const { attempts } = await runAlwaysFail(
+      makeNativeError(
+        403,
+        '403 {"type":"error","error":{"type":"forbidden","message":"Forbidden"}}',
+      ),
+    )
+    expect(attempts).toBe(1)
+  })
+
+  test('stays terminal on a revoked-key native 403 (attempts===1)', async () => {
+    process.env.ANTHROPIC_BASE_URL = ZEN_NATIVE_URL
+    const { attempts } = await runAlwaysFail(
+      makeNativeError(
+        403,
+        '403 {"type":"error","error":{"type":"authentication_error","message":"This API key has been revoked."}}',
+      ),
+    )
+    expect(attempts).toBe(1)
+  })
+
+  test('stays terminal on an org-access native 403 (attempts===1)', async () => {
+    process.env.ANTHROPIC_BASE_URL = ZEN_NATIVE_URL
+    const { attempts } = await runAlwaysFail(
+      makeNativeError(
+        403,
+        '403 {"type":"error","error":{"type":"permission_error","message":"Your organization does not have access to this model."}}',
+      ),
+    )
+    expect(attempts).toBe(1)
+  })
+
+  test('stays terminal on a quota-worded native 403 (attempts===1)', async () => {
+    process.env.ANTHROPIC_BASE_URL = ZEN_NATIVE_URL
+    const { attempts } = await runAlwaysFail(
+      makeNativeError(
+        403,
+        '403 {"type":"error","error":{"type":"rate_limit_error","message":"You exceeded your current quota, please check your plan and billing details."}}',
+      ),
+    )
+    expect(attempts).toBe(1)
+  })
+
+  test('stays terminal for an empty-body native 403 off the Zen lane (attempts===1)', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://api.anthropic.com'
+    const { attempts } = await runAlwaysFail(makeNativeError(403, '403 '))
+    expect(attempts).toBe(1)
+  })
+
+  test('leaves native 401 retry behavior unchanged', async () => {
+    process.env.ANTHROPIC_BASE_URL = ZEN_NATIVE_URL
+    const { result, attempts } = await runOnceThenSucceed(
+      makeNativeError(
+        401,
+        '401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}',
+      ),
+    )
+    expect(result).toEqual({ ok: true })
+    expect(attempts).toBe(2)
   })
 })
 

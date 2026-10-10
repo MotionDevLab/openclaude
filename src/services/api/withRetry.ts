@@ -55,6 +55,7 @@ import {
   extractOpenAICategoryMarker,
   isOpenAIRequestNonReplayable,
   isRetryableOpenAICompatibilityFailureCategory,
+  isTransientThrottleMessage,
 } from './openaiErrorClassification.js'
 
 const abortError = () => new APIUserAbortError()
@@ -853,6 +854,47 @@ function handleGcpCredentialError(error: unknown): boolean {
   return false
 }
 
+/**
+ * Whether the failing request was routed through the OpenCode Zen gateway.
+ * The native Anthropic client never sets `x-opencode-request-url` (shim-only
+ * plumbing), and the Zen lane keys off `ANTHROPIC_BASE_URL`, so all three
+ * signals are checked — any one carrying the Zen host is enough.
+ */
+function isZenRoutedRequest(error: APIError): boolean {
+  const requestUrl = error.headers?.get?.('x-opencode-request-url') ?? ''
+  return [requestUrl, process.env.OPENAI_BASE_URL ?? '', process.env.ANTHROPIC_BASE_URL ?? ''].some(
+    (candidate) => candidate.includes('opencode.ai/zen'),
+  )
+}
+
+/**
+ * Unwrap a native-client 403 body for the throttle matcher. The SDK never
+ * leaves `error.message` empty — it prepends the status (`"403 " + JSON`) —
+ * so strip that prefix, parse the envelope, and match the inner message.
+ * A missing or blank inner message is the empty Zen volume-gating shape.
+ */
+function extractNativeThrottleBody(message: string): string {
+  const stripped = message.replace(/^\d{3}\s+/, '')
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(stripped)
+  } catch {
+    return stripped
+  }
+  if (parsed !== null && typeof parsed === 'object') {
+    const record = parsed as Record<string, unknown>
+    const nested = record.error
+    if (typeof nested === 'string') return nested
+    if (nested !== null && typeof nested === 'object') {
+      const nestedMessage = (nested as Record<string, unknown>).message
+      if (typeof nestedMessage === 'string') return nestedMessage
+    }
+    if (typeof record.message === 'string') return record.message
+  }
+  if (typeof parsed === 'string') return parsed
+  return ''
+}
+
 function shouldRetry(error: APIError, persistentRetryEnabled: boolean): boolean {
   // Never retry mock errors - they're from /mock-limits command for testing
   if (isMockRateLimitError(error)) {
@@ -901,6 +943,22 @@ function shouldRetry(error: APIError, persistentRetryEnabled: boolean): boolean 
   // was impossible before 2a), so no other provider's outcome changes.
   if (error.status === 403 && openAICategory === 'rate_limited') {
     if (isQuotaExhausted(error)) return false
+    return true
+  }
+
+  // Native-path transient throttle-403 (Zen volume gating). The Zen lane
+  // travels the native Anthropic client, so these 403s arrive unmarked and
+  // would otherwise fall through to terminal. Unwrap the SDK-prefixed body,
+  // require the Zen route, and reuse the shim's throttle matcher — anything
+  // else (other providers, auth-shaped bodies) falls through unchanged.
+  if (
+    error.status === 403 &&
+    !openAICategory &&
+    !isOpenCodeGoQuotaError(error) &&
+    !isQuotaExhausted(error) &&
+    isZenRoutedRequest(error) &&
+    isTransientThrottleMessage(extractNativeThrottleBody(error.message ?? ''))
+  ) {
     return true
   }
 
