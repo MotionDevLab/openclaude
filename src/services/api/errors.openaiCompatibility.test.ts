@@ -162,3 +162,22 @@ test('maps stream_options_unsupported after the bounded fallback is exhausted', 
   expect(text).toContain('without usage reporting')
   expect(text).not.toContain('Retrying')
 })
+
+test('exhausted transient throttle-403 surfaces the rate-limit message, not the auth text', () => {
+  // Intended side effect (§3b): once the shim reclassifies an empty-body /
+  // throttle-phrased 403 as rate_limited, the final message after all retries
+  // is the rate-limit text — more accurate than "Authentication failed".
+  const error = APIError.generate(
+    403,
+    undefined,
+    'OpenAI API error 403: Forbidden [openai_category=rate_limited] Hint: Provider throttled the request (403). Backing off and retrying.',
+    new Headers(),
+  )
+
+  const message = getAssistantMessageFromError(error, 'glm-5.1')
+  const text = getFirstText(message)
+
+  expect(message.isApiErrorMessage).toBe(true)
+  expect(text).toContain('Provider rate limit reached. Retry in a few seconds.')
+  expect(text).not.toContain('Authentication failed')
+})

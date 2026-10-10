@@ -1096,7 +1096,9 @@ export async function executeOpenAIRequest(
     const credentialFailureKind =
       failure.category === 'auth_invalid' && !failure.retryable
         ? 'auth'
-        : response.status === 402 || response.status === 429
+        : response.status === 402 ||
+            response.status === 429 ||
+            failure.category === 'rate_limited'
           ? 'cooldown'
           : null
     if (credentialPool && credentialPool.size > 1 && credentialFailureKind) {

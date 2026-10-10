@@ -633,6 +633,60 @@ describe('OpenAI-compatible retry classification', () => {
     expect(attempts).toBe(2)
     expect(observedMaxTokensOverrides).toEqual([undefined, 10941])
   })
+
+  test('retries a 403 carrying the rate_limited marker with a countdown system message', async () => {
+    // Transient throttle-403 (volume gating): the shim classified it
+    // rate_limited, so shouldRetry honors the marker and the loop yields the
+    // standard retry countdown before the second attempt.
+    process.env.OPENCLAUDE_RETRY_DELAY_MS = '1'
+    const { withRetry } = await importFreshWithRetryModule('openai')
+    const error = APIError.generate(
+      403,
+      undefined,
+      'OpenAI API error 403: Forbidden [openai_category=rate_limited,host=zen.example.test] Hint: Provider throttled the request (403). Backing off and retrying.',
+      new Headers(),
+    )
+    let attempts = 0
+    const yielded: unknown[] = []
+
+    const generator = withRetry(
+      async () => ({} as Anthropic),
+      async () => {
+        attempts++
+        if (attempts === 1) throw error
+        return { ok: true }
+      },
+      {
+        maxRetries: 2,
+        model: 'glm-5.1',
+        thinkingConfig: { type: 'disabled' },
+      },
+    )
+    let result: unknown
+    while (true) {
+      const next = await generator.next()
+      if (next.done) {
+        result = next.value
+        break
+      }
+      yielded.push(next.value)
+    }
+
+    expect(result).toEqual({ ok: true })
+    expect(attempts).toBe(2)
+    const countdown = yielded.find(
+      (message) =>
+        typeof message === 'object' &&
+        message !== null &&
+        (message as { type?: unknown }).type === 'system' &&
+        (message as { subtype?: unknown }).subtype === 'api_error',
+    ) as
+      | { retryAttempt?: unknown; maxRetries?: unknown }
+      | undefined
+    expect(countdown).toBeDefined()
+    expect(countdown?.retryAttempt).toBe(1)
+    expect(countdown?.maxRetries).toBe(2)
+  })
 })
 
 // --- parseOpenAIDuration ---
