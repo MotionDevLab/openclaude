@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test'
+import { describe, expect, test } from 'bun:test'
 
 import {
   buildOpenAICompatibilityErrorMessage,
@@ -573,4 +573,74 @@ test('does not classify generic billing 400 errors as quota_exhausted', () => {
 
   expect(failure.category).toBe('malformed_provider_response')
   expect(failure.retryable).toBe(false)
+})
+
+describe('transient throttle-403', () => {
+  test('empty-body 403 classifies retryable (volume gating, not bad key)', () => {
+    const failure = classifyOpenAIHttpFailure({ status: 403, body: '' })
+
+    expect(failure.category).toBe('rate_limited')
+    expect(failure.retryable).toBe(true)
+  })
+
+  test('throttle-phrased 403 classifies retryable', () => {
+    const failure = classifyOpenAIHttpFailure({
+      status: 403,
+      body: 'Too many requests, try again in 30s',
+    })
+
+    expect(failure.retryable).toBe(true)
+  })
+
+  test('real auth 403s stay terminal', () => {
+    for (const body of [
+      'Invalid API key',
+      'access denied',
+      'OAuth token has been revoked',
+      'quota exceeded',
+      'billing limit reached',
+      'organization not allowed',
+    ]) {
+      const failure = classifyOpenAIHttpFailure({ status: 403, body })
+
+      expect(failure.retryable).toBe(false)
+    }
+  })
+
+  test('whitespace-only 403 body classifies retryable like empty', () => {
+    const failure = classifyOpenAIHttpFailure({ status: 403, body: '   \n\t  ' })
+
+    expect(failure.category).toBe('rate_limited')
+    expect(failure.retryable).toBe(true)
+  })
+
+  test('expired-token 403 stays terminal', () => {
+    for (const body of [
+      'OAuth token expired. Re-authenticate.',
+      'token has expired',
+    ]) {
+      const failure = classifyOpenAIHttpFailure({ status: 403, body })
+
+      expect(failure.category).toBe('auth_invalid')
+      expect(failure.retryable).toBe(false)
+    }
+  })
+
+  test('JSON-wrapped throttle phrasing classifies retryable, auth wording stays terminal', () => {
+    const throttled = classifyOpenAIHttpFailure({
+      status: 403,
+      body: '{"error":{"message":"rate limit exceeded, slow down and try again"}}',
+    })
+
+    expect(throttled.category).toBe('rate_limited')
+    expect(throttled.retryable).toBe(true)
+
+    const authed = classifyOpenAIHttpFailure({
+      status: 403,
+      body: '{"error":{"code":403,"message":"Forbidden: invalid api key"}}',
+    })
+
+    expect(authed.category).toBe('auth_invalid')
+    expect(authed.retryable).toBe(false)
+  })
 })

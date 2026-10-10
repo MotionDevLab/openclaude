@@ -413,6 +413,24 @@ function isQuotaExhaustedMessage(body: string): boolean {
   )
 }
 
+function isTransientThrottleMessage(body: string): boolean {
+  // NOTE: mirrored by isThrottle403 in opencode-go-multi-auth
+  // src/proxy/quota-detector.ts — keep the two in sync (comment cross-ref).
+  const lower = body.toLowerCase()
+  if (isQuotaExhaustedMessage(body)) return false // billing stays terminal
+  if (
+    /unauthorized|invalid.{0,10}(key|token)|api key|forbidden|access denied|revoked|expired|permission|not allowed|org_|insufficient_quota|auth/.test(
+      lower,
+    )
+  )
+    return false
+  const trimmed = body.trim()
+  if (trimmed === '') return true // the Zen volume-gating shape
+  return /rate.?limit|too many requests|try again|slow down|throttl|overloaded|capacity|busy/.test(
+    lower,
+  )
+}
+
 export function formatOpenAICategoryMarker(
   category: OpenAICompatibilityFailureCategory,
   host?: string,
@@ -542,6 +560,17 @@ export function classifyOpenAIHttpFailure(options: {
       status: options.status,
       message: body,
       hint: 'Provider quota or usage allotment has run out. Enable billing or switch provider.',
+    }
+  }
+
+  if (options.status === 403 && isTransientThrottleMessage(body)) {
+    return {
+      source: 'http',
+      category: 'rate_limited',
+      retryable: true,
+      status: 403,
+      message: body,
+      hint: 'Provider throttled the request (403). Backing off and retrying.',
     }
   }
 

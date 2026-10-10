@@ -895,6 +895,15 @@ function shouldRetry(error: APIError, persistentRetryEnabled: boolean): boolean 
     return false
   }
 
+  // Transient throttle surfaced as HTTP 403 by OpenAI-compatible upstreams
+  // (volume gating). The shim classified it rate_limited — honor that.
+  // Unreachable for all pre-existing error shapes (403 + rate_limited marker
+  // was impossible before 2a), so no other provider's outcome changes.
+  if (error.status === 403 && openAICategory === 'rate_limited') {
+    if (isQuotaExhausted(error)) return false
+    return true
+  }
+
   // CCR mode: auth is via infrastructure-provided JWTs, so a 401/403 is a
   // transient blip (auth service flap, network hiccup) rather than bad
   // credentials. Bypass x-should-retry:false — the server assumes we'd retry
