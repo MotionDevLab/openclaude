@@ -413,7 +413,7 @@ function isQuotaExhaustedMessage(body: string): boolean {
   )
 }
 
-function isTransientThrottleMessage(body: string): boolean {
+export function isTransientThrottleMessage(body: string): boolean {
   // NOTE: mirrored by isThrottle403 in opencode-go-multi-auth
   // src/proxy/quota-detector.ts — keep the two in sync (comment cross-ref).
   const lower = body.toLowerCase()
