@@ -506,9 +506,19 @@ function parseOpenCodeGoLimitError(
   } else {
     isOpencodeGo = (process.env.OPENAI_BASE_URL ?? '').includes('opencode.ai/zen/go')
   }
-  if (!isOpencodeGo) return null
-
   const body = error.message ?? ''
+  // Hostname-independent guard: the gateway-specific type signatures
+  // identify Go/Free quota regardless of which host the lane uses (direct
+  // `opencode.ai/zen/go` or a loopback proxy sharing the mount point). On
+  // proxy and hatch topologies a `GoUsageLimitError`/`FreeUsageLimitError`
+  // 403 would otherwise fall through to unwrap → `''` → matcher-true →
+  // retry against exhausted quota. Existing header/URL behavior preserved.
+  // 403 scope preserves the pinned 429 retry behavior
+  // (errors.opencodeGo.test.ts:201-217, 219-238, 283-324).
+  const hasGoSignature =
+    error.status === 403 &&
+    (body.includes('GoUsageLimitError') || body.includes('FreeUsageLimitError'))
+  if (!isOpencodeGo && !hasGoSignature) return null
   const retryAfter = error.headers?.get?.('retry-after')
   const retryAfterSeconds = retryAfter ? Number(retryAfter) : undefined
 

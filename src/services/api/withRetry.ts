@@ -15,6 +15,7 @@ import { isAwsCredentialsProviderError } from 'src/utils/aws.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { logError } from 'src/utils/log.js'
 import { createSystemAPIErrorMessage } from 'src/utils/messages.js'
+import { redactSensitiveInfo } from 'src/utils/redaction.js'
 import { getAPIProvider, getAPIProviderForStatsig } from 'src/utils/model/providers.js'
 import {
   clearApiKeyHelperCache,
@@ -855,16 +856,55 @@ function handleGcpCredentialError(error: unknown): boolean {
 }
 
 /**
+ * Whether a configured URL signal identifies a Zen mount point. Parse-first:
+ * the signal must parse as a URL and one RAW path segment (no
+ * percent-decoding — fail closed, so `/%7Aen/` declines) must equal `zen`
+ * (case-insensitive). Host and port are never examined — the gate is
+ * topology-blind by design (direct `opencode.ai/zen` and loopback-proxy
+ * `127.0.0.1/zen/` share the mount point). Empty, missing, or
+ * unparseable signals decline via try/catch (never throw).
+ */
+function zenSignalHasZenSegment(candidate: string): boolean {
+  if (!candidate) return false
+  try {
+    const url = new URL(candidate)
+    return url.pathname
+      .split('/')
+      .some((segment) => segment.toLowerCase() === 'zen')
+  } catch {
+    return false
+  }
+}
+
+/**
  * Whether the failing request was routed through the OpenCode Zen gateway.
  * The native Anthropic client never sets `x-opencode-request-url` (shim-only
- * plumbing), and the Zen lane keys off `ANTHROPIC_BASE_URL`, so all three
- * signals are checked — any one carrying the Zen host is enough.
+ * plumbing), and Zen lanes key off base-URL env vars (direct or loopback
+ * proxy), so all three signals are checked — any one carrying a `/zen/`
+ * path segment is enough. Host and port are never examined.
  */
 function isZenRoutedRequest(error: APIError): boolean {
   const requestUrl = error.headers?.get?.('x-opencode-request-url') ?? ''
-  return [requestUrl, process.env.OPENAI_BASE_URL ?? '', process.env.ANTHROPIC_BASE_URL ?? ''].some(
-    (candidate) => candidate.includes('opencode.ai/zen'),
+  return (
+    zenSignalHasZenSegment(requestUrl) ||
+    zenSignalHasZenSegment(process.env.OPENAI_BASE_URL ?? '') ||
+    zenSignalHasZenSegment(process.env.ANTHROPIC_BASE_URL ?? '')
   )
+}
+
+/**
+ * Build SHA for retry-decision log lines (answers "which build am I
+ * running" at runtime). `MACRO.GIT_SHA` is inlined by `scripts/build.ts`;
+ * the try/catch keeps unbundled unit tests (no define substitution) from
+ * throwing. try/catch — not a typeof guard — so the bundled define still
+ * inlines to the literal SHA.
+ */
+function getBuildGitSha(): string {
+  try {
+    return MACRO.GIT_SHA
+  } catch {
+    return 'dev'
+  }
 }
 
 /**
@@ -872,9 +912,13 @@ function isZenRoutedRequest(error: APIError): boolean {
  * leaves `error.message` empty — it prepends the status (`"403 " + JSON`) —
  * so strip that prefix, parse the envelope, and match the inner message.
  * A missing or blank inner message is the empty Zen volume-gating shape.
+ * Repeated prefixes are stripped (harmless on tested shapes, covers
+ * double-prefixed inputs); the SDK no-body sentinel
+ * (`error.mjs:24-25`, `"403 status code (no body)"`) maps to `''`.
  */
 function extractNativeThrottleBody(message: string): string {
-  const stripped = message.replace(/^\d{3}\s+/, '')
+  const stripped = message.replace(/^(\d{3}\s+)+/, '')
+  if (stripped === 'status code (no body)') return ''
   let parsed: unknown
   try {
     parsed = JSON.parse(stripped)
@@ -947,19 +991,50 @@ function shouldRetry(error: APIError, persistentRetryEnabled: boolean): boolean 
   }
 
   // Native-path transient throttle-403 (Zen volume gating). The Zen lane
-  // travels the native Anthropic client, so these 403s arrive unmarked and
-  // would otherwise fall through to terminal. Unwrap the SDK-prefixed body,
-  // require the Zen route, and reuse the shim's throttle matcher — anything
-  // else (other providers, auth-shaped bodies) falls through unchanged.
-  if (
-    error.status === 403 &&
-    !openAICategory &&
-    !isOpenCodeGoQuotaError(error) &&
-    !isQuotaExhausted(error) &&
-    isZenRoutedRequest(error) &&
-    isTransientThrottleMessage(extractNativeThrottleBody(error.message ?? ''))
-  ) {
-    return true
+  // travels the native Anthropic client (direct `opencode.ai/zen` or a
+  // loopback proxy sharing the `/zen/` mount point), so these 403s arrive
+  // unmarked and would otherwise fall through to terminal. Unwrap the
+  // SDK-prefixed body, require the Zen route (or the opt-in hatch), and
+  // reuse the shim's throttle matcher — anything else (other providers,
+  // auth-shaped bodies) falls through unchanged.
+  // Single evaluation: the matcher runs once; the same verdict feeds the
+  // debug line and the decision. `branchOutcome` — not `decision` —
+  // because later rules (CCR, x-should-retry, revocation) may still retry
+  // after a fallthrough. Declines exiting earlier (loop pre-gates,
+  // non-retryable-marker return) are not covered by this line — it
+  // diagnoses exactly the unmarked-native-403 class.
+  if (error.status === 403 && !openAICategory) {
+    const goQuota = isOpenCodeGoQuotaError(error)
+    const quotaExhausted = isQuotaExhausted(error)
+    // Opt-in hatch for unknowable topologies (e.g. a proxy mounting Zen
+    // at root with no `/zen/` segment): bypasses ONLY the gate. Quota and
+    // matcher guards below still apply.
+    const hatch = isEnvTruthy(process.env.OPENCLAUDE_ZEN_THROTTLE_RETRY)
+    const gateHeader = zenSignalHasZenSegment(
+      error.headers?.get?.('x-opencode-request-url') ?? '',
+    )
+    const gateOpenai = zenSignalHasZenSegment(
+      process.env.OPENAI_BASE_URL ?? '',
+    )
+    const gateAnthropic = zenSignalHasZenSegment(
+      process.env.ANTHROPIC_BASE_URL ?? '',
+    )
+    const gate = gateHeader || gateOpenai || gateAnthropic
+    const unwrapped = extractNativeThrottleBody(error.message ?? '')
+    const matcherVerdict = isTransientThrottleMessage(unwrapped)
+    const branchOutcome =
+      !goQuota && !quotaExhausted && (hatch || gate) && matcherVerdict
+        ? 'retry'
+        : 'fallthrough'
+    // Redact the COMPLETE unwrapped body first, then truncate:
+    // truncation-first can destroy credential shapes the redactor matches.
+    // `logForDebugging` is level-gated (debug mode or ant; min-level/filter
+    // may suppress; stderr mode writes to stderr) and redacts again.
+    const bodyPreview = redactSensitiveInfo(unwrapped).slice(0, 120)
+    logForDebugging(
+      `native-zen-403 status=403 marker=none goQuota=${goQuota} quotaExhausted=${quotaExhausted} hatch=${hatch} gateHeader=${gateHeader} gateOpenai=${gateOpenai} gateAnthropic=${gateAnthropic} gate=${gate} matcher=${matcherVerdict} branchOutcome=${branchOutcome} sha=${getBuildGitSha()} bodyPreview=${bodyPreview}`,
+    )
+    if (branchOutcome === 'retry') return true
   }
 
   // CCR mode: auth is via infrastructure-provided JWTs, so a 401/403 is a

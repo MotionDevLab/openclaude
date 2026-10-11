@@ -10,6 +10,7 @@ declare const MACRO: {
   VERSION: string
   DISPLAY_VERSION: string
   BUILD_TIME: string
+  GIT_SHA: string
   ISSUES_EXPLAINER: string
   FEEDBACK_CHANNEL: string
   PACKAGE_URL: string

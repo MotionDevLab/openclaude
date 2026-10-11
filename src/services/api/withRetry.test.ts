@@ -37,6 +37,7 @@ const envKeys = [
   'OPENAI_BASE_URL',
   'OPENAI_API_BASE',
   'ANTHROPIC_BASE_URL',
+  'OPENCLAUDE_ZEN_THROTTLE_RETRY',
 ] as const
 
 beforeEach(async () => {
@@ -868,6 +869,462 @@ describe('Native-path transient 403 retry (Zen volume gating)', () => {
     )
     expect(result).toEqual({ ok: true })
     expect(attempts).toBe(2)
+  })
+})
+
+// v2 (fix/native-zen-403-v2): path-segment gate, hatch, unwrap hardening,
+// decision logging. All new fixtures are SDK-realistic — built via
+// APIError.generate(status, errorResponseObject, undefined, headers) so the
+// SDK builds the single `"403 " + JSON` prefix itself (never pre-prefixed
+// message strings, which double-prefix and pass via fallback paths).
+describe('Native-path Zen gate v2 (path-segment rule + hatch)', () => {
+  // SDK-realistic fixture builder: the SDK builds `.message` as
+  // `status + body` itself (error.mjs:14-26); the genuine no-body shape is
+  // `'403 status code (no body)'` (error.mjs:24-25).
+  function makeSdkError(
+    status: number,
+    errorResponse: unknown,
+    headers: Record<string, string> = {},
+  ): APIError {
+    return APIError.generate(
+      status,
+      errorResponse as never,
+      undefined,
+      new Headers(headers),
+    )
+  }
+
+  function makeSdkEmptyBody(headers: Record<string, string> = {}): APIError {
+    return makeSdkError(403, undefined, headers)
+  }
+
+  function makeSdkInnerMessage(
+    innerMessage: string,
+    headers: Record<string, string> = {},
+  ): APIError {
+    return makeSdkError(
+      403,
+      { error: { type: 'api_error', message: innerMessage } },
+      headers,
+    )
+  }
+
+  function makeSdkGoBody(
+    kind: 'GoUsageLimitError' | 'FreeUsageLimitError',
+    headers: Record<string, string> = {},
+  ): APIError {
+    return makeSdkError(
+      403,
+      {
+        error: {
+          type: kind,
+          message:
+            kind === 'GoUsageLimitError'
+              ? 'go subscription limit reached'
+              : 'free usage limit reached',
+          limitName: 'weekly',
+          workspace: 'euxaristia-personal',
+        },
+      },
+      headers,
+    )
+  }
+
+  async function runOnceThenSucceedV2(error: APIError) {
+    process.env.OPENCLAUDE_RETRY_DELAY_MS = '1'
+    const { withRetry } = await importFreshWithRetryModule('firstParty')
+    let attempts = 0
+    const yielded: unknown[] = []
+    const generator = withRetry(
+      async () => ({} as Anthropic),
+      async () => {
+        attempts++
+        if (attempts === 1) throw error
+        return { ok: true }
+      },
+      {
+        maxRetries: 2,
+        model: 'muse-spark-1.3-contributor-free',
+        thinkingConfig: { type: 'disabled' },
+      },
+    )
+    let result: unknown
+    while (true) {
+      const next = await generator.next()
+      if (next.done) {
+        result = next.value
+        break
+      }
+      yielded.push(next.value)
+    }
+    return { result, attempts, yielded }
+  }
+
+  async function runAlwaysFailV2(error: APIError) {
+    process.env.OPENCLAUDE_RETRY_DELAY_MS = '1'
+    const { CannotRetryError, withRetry } =
+      await importFreshWithRetryModule('firstParty')
+    let attempts = 0
+    let caught: unknown
+    try {
+      await drainAsyncGenerator(
+        withRetry(
+          async () => ({} as Anthropic),
+          async () => {
+            attempts++
+            throw error
+          },
+          {
+            maxRetries: 2,
+            model: 'muse-spark-1.3-contributor-free',
+            thinkingConfig: { type: 'disabled' },
+          },
+        ),
+      )
+    } catch (e) {
+      caught = e
+    }
+    expect(caught).toBeInstanceOf(CannotRetryError)
+    return { caught, attempts }
+  }
+
+  function findCountdownV2(yielded: unknown[]) {
+    return yielded.find(
+      (message) =>
+        typeof message === 'object' &&
+        message !== null &&
+        (message as { type?: unknown }).type === 'system' &&
+        (message as { subtype?: unknown }).subtype === 'api_error',
+    ) as { retryAttempt?: unknown; maxRetries?: unknown } | undefined
+  }
+
+  function debugLines(calls: unknown[][]): string[] {
+    return calls
+      .map((args) => (typeof args[0] === 'string' ? (args[0] as string) : ''))
+      .filter((line) => line.includes('native-zen-403'))
+  }
+
+  // §3.1 — the regression test for tonight: proxy empty-body via
+  // ANTHROPIC_BASE_URL retries with a countdown.
+  test('retries a proxy empty-body 403 via ANTHROPIC_BASE_URL with a countdown', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'http://127.0.0.1:18905/zen/v1'
+    const error = makeSdkEmptyBody()
+    expect(error.message).toBe('403 status code (no body)')
+    const { result, attempts, yielded } = await runOnceThenSucceedV2(error)
+    expect(result).toEqual({ ok: true })
+    expect(attempts).toBe(2)
+    const countdown = findCountdownV2(yielded)
+    expect(countdown).toBeDefined()
+    expect(countdown?.retryAttempt).toBe(1)
+    expect(countdown?.maxRetries).toBe(2)
+  })
+
+  // §3.2 — host/port-agnostic proof + LAN-IP and bracketed-IPv6 twins.
+  test('retries via OPENAI_BASE_URL on a different port + localhost host', async () => {
+    process.env.OPENAI_BASE_URL = 'http://localhost:8080/zen/v1'
+    const { result, attempts } = await runOnceThenSucceedV2(makeSdkEmptyBody())
+    expect(result).toEqual({ ok: true })
+    expect(attempts).toBe(2)
+  })
+
+  test('retries via OPENAI_BASE_URL on a LAN IP host', async () => {
+    process.env.OPENAI_BASE_URL = 'http://192.168.1.10:18905/zen/v1'
+    const { result, attempts } = await runOnceThenSucceedV2(makeSdkEmptyBody())
+    expect(result).toEqual({ ok: true })
+    expect(attempts).toBe(2)
+  })
+
+  test('retries via OPENAI_BASE_URL on a bracketed-IPv6 host', async () => {
+    process.env.OPENAI_BASE_URL = 'http://[::1]:18905/zen/v1'
+    const { result, attempts } = await runOnceThenSucceedV2(makeSdkEmptyBody())
+    expect(result).toEqual({ ok: true })
+    expect(attempts).toBe(2)
+  })
+
+  // §3.3 — non-Zen guard.
+  test('stays terminal for an empty-body 403 on an Ollama lane (attempts===1)', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'http://localhost:11434/v1'
+    const { attempts } = await runAlwaysFailV2(makeSdkEmptyBody())
+    expect(attempts).toBe(1)
+  })
+
+  // §3.4 — case variant, trailing slash, query-string twins retry…
+  test('retries a ZEN case-variant proxy URL', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'http://127.0.0.1:18905/ZEN/v1'
+    const { result, attempts } = await runOnceThenSucceedV2(makeSdkEmptyBody())
+    expect(result).toEqual({ ok: true })
+    expect(attempts).toBe(2)
+  })
+
+  test('retries a trailing-slash proxy URL', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'http://127.0.0.1:18905/zen/v1/'
+    const { result, attempts } = await runOnceThenSucceedV2(makeSdkEmptyBody())
+    expect(result).toEqual({ ok: true })
+    expect(attempts).toBe(2)
+  })
+
+  test('retries a query-string proxy URL', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'http://127.0.0.1:18905/zen/v1?foo=bar'
+    const { result, attempts } = await runOnceThenSucceedV2(makeSdkEmptyBody())
+    expect(result).toEqual({ ok: true })
+    expect(attempts).toBe(2)
+  })
+
+  // …while partial-segment, smuggled-query, and unparseable-with-substring decline.
+  test('stays terminal for a partial-segment zenith URL (attempts===1)', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://opencode.ai/zenith/v1'
+    const { attempts } = await runAlwaysFailV2(makeSdkEmptyBody())
+    expect(attempts).toBe(1)
+  })
+
+  test('stays terminal for a smuggled-query URL (attempts===1)', async () => {
+    process.env.ANTHROPIC_BASE_URL =
+      'http://localhost:11434/v1?target=https://opencode.ai/zen/v1'
+    const { attempts } = await runAlwaysFailV2(makeSdkEmptyBody())
+    expect(attempts).toBe(1)
+  })
+
+  test('stays terminal for an unparseable signal carrying the substring, without throwing', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'not a url with opencode.ai/zen inside'
+    const { attempts } = await runAlwaysFailV2(makeSdkEmptyBody())
+    expect(attempts).toBe(1)
+  })
+
+  // §3.5 — hatch twins + false values + hatch-bypass limits.
+  test('hatch=1 retries an empty-body 403 on a first-party URL', async () => {
+    process.env.OPENCLAUDE_ZEN_THROTTLE_RETRY = '1'
+    process.env.ANTHROPIC_BASE_URL = 'https://api.anthropic.com'
+    const { result, attempts } = await runOnceThenSucceedV2(makeSdkEmptyBody())
+    expect(result).toEqual({ ok: true })
+    expect(attempts).toBe(2)
+  })
+
+  test('false-valued hatch behaves as unset (0/false → terminal)', async () => {
+    for (const hatchValue of ['0', 'false']) {
+      process.env.OPENCLAUDE_ZEN_THROTTLE_RETRY = hatchValue
+      process.env.ANTHROPIC_BASE_URL = 'https://api.anthropic.com'
+      const { attempts } = await runAlwaysFailV2(makeSdkEmptyBody())
+      expect(attempts).toBe(1)
+      delete process.env.OPENCLAUDE_ZEN_THROTTLE_RETRY
+      delete process.env.ANTHROPIC_BASE_URL
+    }
+  })
+
+  test('hatch=1 still declines a forbidden-worded body (gate-only bypass)', async () => {
+    process.env.OPENCLAUDE_ZEN_THROTTLE_RETRY = '1'
+    process.env.ANTHROPIC_BASE_URL = 'https://api.anthropic.com'
+    const { attempts } = await runAlwaysFailV2(
+      makeSdkInnerMessage('Forbidden'),
+    )
+    expect(attempts).toBe(1)
+  })
+
+  test('hatch=1 still declines a quota-worded body (gate-only bypass)', async () => {
+    process.env.OPENCLAUDE_ZEN_THROTTLE_RETRY = '1'
+    process.env.ANTHROPIC_BASE_URL = 'https://api.anthropic.com'
+    const { attempts } = await runAlwaysFailV2(
+      makeSdkInnerMessage(
+        'You exceeded your current quota, please check your plan and billing details.',
+      ),
+    )
+    expect(attempts).toBe(1)
+  })
+
+  test('hatch=1 still declines a marked auth_invalid 403 (marker guard intact)', async () => {
+    process.env.OPENCLAUDE_ZEN_THROTTLE_RETRY = '1'
+    process.env.ANTHROPIC_BASE_URL = 'https://api.anthropic.com'
+    const error = APIError.generate(
+      403,
+      undefined,
+      'OpenAI API error 403: Forbidden [openai_category=auth_invalid,host=api.anthropic.com] Hint: Authentication failed.',
+      new Headers(),
+    )
+    const { attempts } = await runAlwaysFailV2(error)
+    expect(attempts).toBe(1)
+  })
+
+  test('hatch=1 still declines a non-replayable 403 (pre-gate intact)', async () => {
+    process.env.OPENCLAUDE_ZEN_THROTTLE_RETRY = '1'
+    process.env.ANTHROPIC_BASE_URL = 'https://api.anthropic.com'
+    const error = markOpenAIRequestNonReplayable(makeSdkEmptyBody())
+    const { attempts } = await runAlwaysFailV2(error)
+    expect(attempts).toBe(1)
+  })
+
+  // §3.6 — unparseable / empty / missing signals + root-mounted proxy.
+  test('stays terminal for an unparseable ANTHROPIC_BASE_URL, without throwing', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'not a url'
+    const { attempts } = await runAlwaysFailV2(makeSdkEmptyBody())
+    expect(attempts).toBe(1)
+  })
+
+  test('stays terminal when all gate signals are missing (attempts===1)', async () => {
+    const { attempts } = await runAlwaysFailV2(makeSdkEmptyBody())
+    expect(attempts).toBe(1)
+  })
+
+  test('root-mounted proxy declines hatch-off but retries hatch-on', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'http://x:8080/v1'
+    const { attempts } = await runAlwaysFailV2(makeSdkEmptyBody())
+    expect(attempts).toBe(1)
+
+    process.env.OPENCLAUDE_ZEN_THROTTLE_RETRY = '1'
+    const { result, attempts: hatchAttempts } = await runOnceThenSucceedV2(
+      makeSdkEmptyBody(),
+    )
+    expect(result).toEqual({ ok: true })
+    expect(hatchAttempts).toBe(2)
+  })
+
+  // §3.7 — header-only proxy detection (no env set).
+  test('retries via the x-opencode-request-url header gate alone', async () => {
+    const { result, attempts } = await runOnceThenSucceedV2(
+      makeSdkEmptyBody({
+        'x-opencode-request-url': 'http://127.0.0.1:18905/zen/v1/messages',
+      }),
+    )
+    expect(result).toEqual({ ok: true })
+    expect(attempts).toBe(2)
+  })
+
+  // §3.8 — no-body sentinel unwrap proof.
+  test('retries the SDK no-body sentinel on the Zen lane', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'http://127.0.0.1:18905/zen/v1'
+    const error = makeSdkEmptyBody()
+    expect(error.message).toBe('403 status code (no body)')
+    const { result, attempts } = await runOnceThenSucceedV2(error)
+    expect(result).toEqual({ ok: true })
+    expect(attempts).toBe(2)
+  })
+
+  // §3.9 — Go/Free proxy cases stay terminal, even with the hatch.
+  test('stays terminal for a GoUsageLimitError body on a proxy Go URL (attempts===1)', async () => {
+    process.env.OPENAI_BASE_URL = 'http://127.0.0.1:18905/zen/go/v1'
+    const { attempts } = await runAlwaysFailV2(
+      makeSdkGoBody('GoUsageLimitError'),
+    )
+    expect(attempts).toBe(1)
+  })
+
+  test('stays terminal for a FreeUsageLimitError body on a proxy Go URL (attempts===1)', async () => {
+    process.env.OPENAI_BASE_URL = 'http://127.0.0.1:18905/zen/go/v1'
+    const { attempts } = await runAlwaysFailV2(
+      makeSdkGoBody('FreeUsageLimitError'),
+    )
+    expect(attempts).toBe(1)
+  })
+
+  test('hatch=1 still declines Go quota bodies on a proxy Go URL', async () => {
+    process.env.OPENCLAUDE_ZEN_THROTTLE_RETRY = '1'
+    process.env.OPENAI_BASE_URL = 'http://127.0.0.1:18905/zen/go/v1'
+    const { attempts } = await runAlwaysFailV2(
+      makeSdkGoBody('GoUsageLimitError'),
+    )
+    expect(attempts).toBe(1)
+  })
+
+  // §3.10 — direct shouldRetry() guard tests past the loop pre-gates.
+  test('direct shouldRetry declines quota_exhausted even when the matcher alone is true', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'http://127.0.0.1:18905/zen/v1'
+    const { shouldRetry } = (await importFreshWithRetryModule(
+      'firstParty',
+    )) as {
+      shouldRetry?: (e: APIError, persistentRetryEnabled: boolean) => boolean
+    }
+    expect(shouldRetry).toBeDefined()
+    const error = makeSdkInnerMessage(
+      'quota_exhausted: please try again shortly',
+    )
+    expect(shouldRetry!(error, false)).toBe(false)
+  })
+
+  test('direct shouldRetry with hatch=1 still declines quota_exhausted bodies', async () => {
+    process.env.OPENCLAUDE_ZEN_THROTTLE_RETRY = '1'
+    process.env.ANTHROPIC_BASE_URL = 'http://127.0.0.1:18905/zen/v1'
+    const { shouldRetry } = (await importFreshWithRetryModule(
+      'firstParty',
+    )) as {
+      shouldRetry?: (e: APIError, persistentRetryEnabled: boolean) => boolean
+    }
+    expect(shouldRetry).toBeDefined()
+    const error = makeSdkInnerMessage(
+      'quota_exhausted: please try again shortly',
+    )
+    expect(shouldRetry!(error, false)).toBe(false)
+  })
+
+  // §3.11 — decline/firing decision logging via the existing mock seam.
+  test('decline logs a fallthrough line with matcher verdict + hatch flag', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'http://127.0.0.1:18905/zen/v1'
+    process.env.OPENCLAUDE_RETRY_DELAY_MS = '1'
+    const logForDebugging = mock(() => {})
+    const { CannotRetryError, withRetry } =
+      await importFreshWithRetryModule('firstParty', { logForDebugging })
+    const error = makeSdkInnerMessage('Forbidden')
+    let attempts = 0
+    try {
+      await drainAsyncGenerator(
+        withRetry(
+          async () => ({} as Anthropic),
+          async () => {
+            attempts++
+            throw error
+          },
+          {
+            maxRetries: 2,
+            model: 'muse-spark-1.3-contributor-free',
+            thinkingConfig: { type: 'disabled' },
+          },
+        ),
+      )
+    } catch (e) {
+      expect(e).toBeInstanceOf(CannotRetryError)
+    }
+    expect(attempts).toBe(1)
+    const lines = debugLines(
+      (logForDebugging as unknown as { mock: { calls: unknown[][] } }).mock
+        .calls,
+    )
+    expect(lines.length).toBeGreaterThan(0)
+    const line = lines[lines.length - 1]!
+    expect(line).toContain('branchOutcome=fallthrough')
+    expect(line).toContain('matcher=false')
+    expect(line).toContain('hatch=false')
+  })
+
+  test('firing retry logs a retry line with matcher verdict + hatch flag', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'http://127.0.0.1:18905/zen/v1'
+    const logForDebugging = mock(() => {})
+    process.env.OPENCLAUDE_RETRY_DELAY_MS = '1'
+    const { withRetry } = await importFreshWithRetryModule('firstParty', {
+      logForDebugging,
+    })
+    const error = makeSdkEmptyBody()
+    let attempts = 0
+    const generator = withRetry(
+      async () => ({} as Anthropic),
+      async () => {
+        attempts++
+        if (attempts === 1) throw error
+        return { ok: true }
+      },
+      {
+        maxRetries: 2,
+        model: 'muse-spark-1.3-contributor-free',
+        thinkingConfig: { type: 'disabled' },
+      },
+    )
+    await drainAsyncGenerator(generator)
+    expect(attempts).toBe(2)
+    const lines = debugLines(
+      (logForDebugging as unknown as { mock: { calls: unknown[][] } }).mock
+        .calls,
+    )
+    expect(lines.length).toBeGreaterThan(0)
+    const line = lines[lines.length - 1]!
+    expect(line).toContain('branchOutcome=retry')
+    expect(line).toContain('matcher=true')
+    expect(line).toContain('hatch=false')
   })
 })
 

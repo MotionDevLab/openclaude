@@ -9,6 +9,7 @@
  */
 
 import { existsSync, readFileSync } from 'fs'
+import { execSync } from 'child_process'
 import { createRequire } from 'module'
 import { dirname, join } from 'path'
 import { noTelemetryPlugin } from './no-telemetry-plugin'
@@ -18,6 +19,20 @@ import { canonicalStub, collectBundleStubs } from './stubMarkerGuard.js'
 const nodeRequire = createRequire(import.meta.url)
 const pkg = JSON.parse(readFileSync('./package.json', 'utf-8'))
 const version = pkg.version
+
+function resolveGitSha(): string {
+  try {
+    const sha = execSync('git rev-parse --short HEAD', {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+      .toString()
+      .trim()
+    return sha || 'unknown'
+  } catch {
+    return 'unknown'
+  }
+}
+const gitSha = resolveGitSha()
 const reactPackageDir = dirname(nodeRequire.resolve('react/package.json'))
 const reactReconcilerPackageDir = dirname(
   nodeRequire.resolve('react-reconciler/package.json'),
@@ -202,6 +217,7 @@ result = await Bun.build({
     'MACRO.VERSION': JSON.stringify('99.0.0'),
     'MACRO.DISPLAY_VERSION': JSON.stringify(version),
     'MACRO.BUILD_TIME': JSON.stringify(new Date().toISOString()),
+    'MACRO.GIT_SHA': JSON.stringify(gitSha),
     'MACRO.ISSUES_EXPLAINER':
       JSON.stringify('report the issue at https://github.com/Gitlawb/openclaude/issues'),
     'MACRO.FEEDBACK_CHANNEL':
@@ -545,6 +561,7 @@ sdkResult = await Bun.build({
     'MACRO.VERSION': JSON.stringify(version),
     'MACRO.DISPLAY_VERSION': JSON.stringify(version),
     'MACRO.BUILD_TIME': JSON.stringify(new Date().toISOString()),
+    'MACRO.GIT_SHA': JSON.stringify(gitSha),
     'MACRO.ISSUES_EXPLAINER':
       JSON.stringify('report the issue at https://github.com/Gitlawb/openclaude/issues'),
     'MACRO.FEEDBACK_CHANNEL':
