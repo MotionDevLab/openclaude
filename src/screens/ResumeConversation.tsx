@@ -10,6 +10,7 @@ import { Spinner } from '../components/Spinner.js';
 import { restoreCostStateForSession } from '../cost-tracker.js';
 import { setClipboard } from '../ink/termio/osc.js';
 import { Box, Text } from '../ink.js';
+import useApp from '../ink/hooks/use-app.js';
 import { useKeybinding } from '../keybindings/useKeybinding.js';
 import { type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS, logEvent } from '../services/analytics/index.js';
 import type { MCPServerConnection, ScopedMcpServerConfig } from '../services/mcp/types.js';
@@ -87,6 +88,7 @@ export function ResumeConversation({
   } = useTerminalSize();
   const agentDefinitions = useAppState(s => s.agentDefinitions);
   const setAppState = useSetAppState();
+  const { exit } = useApp();
   const [logs, setLogs] = React.useState<LogOption[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [resuming, setResuming] = React.useState(false);
@@ -157,9 +159,34 @@ export function ResumeConversation({
     setShowAllProjects(newValue);
     loadLogs(newValue);
   }, [showAllProjects, loadLogs]);
+  /**
+   * Exit the picker with the given code after Ink has unmounted.
+   * Ink's unmount erases the inline picker frame via an async stdout write;
+   * process.exit() drops unflushed writes, which left the stale frame behind
+   * (Esc looked dead although the process had ended). Flushing first lets the
+   * erase land. The failsafe covers a stdout that never drains.
+   */
+  function exitPicker(exitCode: number): void {
+    try {
+      process.stdout.write('', () => {
+        // eslint-disable-next-line custom-rules/no-process-exit -- flush-then-exit, see above
+        process.exit(exitCode);
+      });
+    } catch {
+      // eslint-disable-next-line custom-rules/no-process-exit -- flush-then-exit, see above
+      process.exit(exitCode);
+    }
+    // eslint-disable-next-line custom-rules/no-process-exit -- failsafe, see above
+    setTimeout(() => process.exit(exitCode), 500);
+  }
   function onCancel() {
-    // eslint-disable-next-line custom-rules/no-process-exit
-    process.exit(1);
+    // Unmount first so the picker frame is erased and terminal modes are
+    // restored; exitPicker flushes the erase before exiting. Exiting here
+    // preempts renderAndRun's shutdown epilogue, so no resume hint or
+    // SessionEnd hooks run for a cancel — same observable behavior as
+    // before, minus the residue. Exit code 1 (cancel) is preserved.
+    exit();
+    exitPicker(1);
   }
   async function onSelect(log_0: LogOption) {
     setResumeError(null);
