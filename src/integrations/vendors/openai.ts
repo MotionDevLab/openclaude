@@ -63,6 +63,21 @@ export default defineVendor({
       { id: 'gpt-5.6-terra', apiName: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', modelDescriptorId: 'gpt-5.6-terra', contextWindow: 1_050_000, maxOutputTokens: 128_000, capabilities: { supportsReasoning: true }, reasoning: { mode: 'levels', levels: ['low', 'medium', 'high', 'xhigh'], defaultLevel: 'high', wireFormat: 'reasoning_effort' } },
       { id: 'gpt-5.6-luna', apiName: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', modelDescriptorId: 'gpt-5.6-luna', contextWindow: 1_050_000, maxOutputTokens: 128_000, capabilities: { supportsReasoning: true }, reasoning: { mode: 'levels', levels: ['low', 'medium', 'high', 'xhigh'], defaultLevel: 'high', wireFormat: 'reasoning_effort' } },
       { id: 'gpt-5.5', apiName: 'gpt-5.5', label: 'GPT-5.5', modelDescriptorId: 'gpt-5.5', contextWindow: 272_000, maxOutputTokens: 128_000, capabilities: { supportsReasoning: true }, reasoning: { mode: 'levels', levels: ['low', 'medium', 'high', 'xhigh'], defaultLevel: 'high', wireFormat: 'reasoning_effort' } },
+      // GPT-6 family (October 2026): same /v1/responses + nested
+      // reasoning.effort wire shape as the 5.6 family (modelRequiresResponsesApi
+      // routes them there; verified 5.6 behavior, inherited pending live
+      // GPT-6 wire confirmation). Effort ladder per models.dev
+      // `reasoning_options` (low, medium, high, xhigh, max) plus the
+      // operator-confirmed native-Codex Ultra tier on Sol/Astra model types
+      // only (2026-10-13): flagships (astra/sol/6.1-sol) expose `max`, Luna
+      // tops out at `xhigh`. The Ultra→max wire mapping is the working
+      // hypothesis, not a live-verified row — see the gpt6.ts descriptor
+      // comment. Defaults inherit the family pattern (high flagship,
+      // medium luna) pending Codex-default evidence.
+      { id: 'gpt-6-astra', apiName: 'gpt-6-astra', label: 'GPT-6 Astra', modelDescriptorId: 'gpt-6-astra', contextWindow: 1_050_000, maxOutputTokens: 128_000, capabilities: { supportsReasoning: true }, reasoning: { mode: 'levels', levels: ['low', 'medium', 'high', 'xhigh', 'max'], defaultLevel: 'high', wireFormat: 'reasoning_effort' } },
+      { id: 'gpt-6.1-sol', apiName: 'gpt-6.1-sol', label: 'GPT-6.1 Sol', modelDescriptorId: 'gpt-6.1-sol', contextWindow: 1_050_000, maxOutputTokens: 128_000, capabilities: { supportsReasoning: true }, reasoning: { mode: 'levels', levels: ['low', 'medium', 'high', 'xhigh', 'max'], defaultLevel: 'high', wireFormat: 'reasoning_effort' } },
+      { id: 'gpt-6-sol', apiName: 'gpt-6-sol', label: 'GPT-6 Sol', modelDescriptorId: 'gpt-6-sol', contextWindow: 1_050_000, maxOutputTokens: 128_000, capabilities: { supportsReasoning: true }, reasoning: { mode: 'levels', levels: ['low', 'medium', 'high', 'xhigh', 'max'], defaultLevel: 'high', wireFormat: 'reasoning_effort' } },
+      { id: 'gpt-6-luna', apiName: 'gpt-6-luna', label: 'GPT-6 Luna', modelDescriptorId: 'gpt-6-luna', contextWindow: 1_050_000, maxOutputTokens: 128_000, capabilities: { supportsReasoning: true }, reasoning: { mode: 'levels', levels: ['low', 'medium', 'high', 'xhigh'], defaultLevel: 'medium', wireFormat: 'reasoning_effort' } },
       { id: 'gpt-5.4', apiName: 'gpt-5.4', label: 'GPT-5.4', modelDescriptorId: 'gpt-5.4', contextWindow: 1_050_000, maxOutputTokens: 128_000, capabilities: { supportsReasoning: true }, reasoning: { mode: 'levels', levels: ['low', 'medium', 'high', 'xhigh'], defaultLevel: 'high', wireFormat: 'reasoning_effort' } },
       { id: 'gpt-5-mini', apiName: 'gpt-5-mini', label: 'GPT-5 Mini' },
       { id: 'gpt-4o', apiName: 'gpt-4o', label: 'GPT-4o' },

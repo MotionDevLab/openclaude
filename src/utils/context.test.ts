@@ -458,6 +458,39 @@ test('gpt-5.6 family keeps the full window on the direct-OpenAI route', () => {
   }
 })
 
+test('gpt-6 family ships the full API spec on the Codex route (no Codex cap published)', () => {
+  process.env.CLAUDE_CODE_USE_OPENAI = '1'
+  process.env.OPENAI_BASE_URL = 'https://chatgpt.com/backend-api/codex'
+  delete process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS
+  delete process.env.OPENAI_MODEL
+
+  // Unlike the 5.6 family (pinned to the verified ~272k Codex effective
+  // input boundary), GPT-6 has no published Codex-route cap — the 272k pin
+  // is verified ONLY for 5.6 (openai/codex#33972). The gpt6.ts descriptors
+  // carry the full 1.05M spec with a dated comment + first-500 monitoring
+  // flag; if the Codex backend enforces a lower cap, pin them then.
+  for (const model of ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna']) {
+    expect(getContextWindowForModel(model)).toBe(1_050_000)
+    expect(getModelMaxOutputTokens(model)).toEqual({
+      default: 128_000,
+      upperLimit: 128_000,
+    })
+  }
+})
+
+test('gpt-6 family keeps the full window on the direct-OpenAI route', () => {
+  process.env.CLAUDE_CODE_USE_OPENAI = '1'
+  delete process.env.OPENAI_BASE_URL
+  delete process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS
+  delete process.env.OPENAI_MODEL
+
+  // The openai-route catalog entries preserve the true 1.05M window,
+  // same as the 5.6 family.
+  for (const model of ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna']) {
+    expect(getContextWindowForModel(model)).toBe(1_050_000)
+  }
+})
+
 test('gpt-5.4 family uses provider-specific context and output caps', () => {
   process.env.CLAUDE_CODE_USE_OPENAI = '1'
   delete process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS

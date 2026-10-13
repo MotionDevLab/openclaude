@@ -103,6 +103,33 @@ const CODEX_ALIAS_MODELS: Record<
     model: 'gpt-5.6-luna',
     reasoningEffort: 'medium',
   },
+  // GPT-6 family (October 2026). Served on the Codex backend (native picker:
+  // GPT-6.1 Sol, Astra, Sol, Luna) and direct OpenAI /v1/responses. Bare
+  // `gpt-6` follows the Codex CLI convention of resolving to the flagship
+  // tier (Sol). Defaults inherit the family pattern (high flagship, medium
+  // luna) pending Codex-default evidence — see the gpt6.ts descriptor
+  // comment. gpt-5.5 stays pinned: it retires from Codex sign-in 2026-10-14
+  // and codexplan already resolves to gpt-5.6-sol above.
+  'gpt-6': {
+    model: 'gpt-6-sol',
+    reasoningEffort: 'high',
+  },
+  'gpt-6-astra': {
+    model: 'gpt-6-astra',
+    reasoningEffort: 'high',
+  },
+  'gpt-6.1-sol': {
+    model: 'gpt-6.1-sol',
+    reasoningEffort: 'high',
+  },
+  'gpt-6-sol': {
+    model: 'gpt-6-sol',
+    reasoningEffort: 'high',
+  },
+  'gpt-6-luna': {
+    model: 'gpt-6-luna',
+    reasoningEffort: 'medium',
+  },
   'gpt-5.5': {
     model: 'gpt-5.5',
     reasoningEffort: 'high',
@@ -487,7 +514,13 @@ function shouldUseGithubResponsesApi(model: string): boolean {
 // gpt-5-mini, gpt-4.x, o-series, and claude-* stay on chat/completions.
 export function modelRequiresResponsesApi(model: string): boolean {
   const normalized = model.trim().toLowerCase().split('?', 1)[0] ?? ''
-  return /^gpt-5\.[4-6](?!\d)/.test(normalized) &&
+  const isGpt56Responses = /^gpt-5\.[4-6](?!\d)/.test(normalized)
+  // GPT-6 family inherits the 5.6 responses routing: same reasoning-model
+  // shape (function tools + reasoning_effort rejected on chat/completions).
+  // Verified 5.6 behavior, inherited pending live GPT-6 wire confirmation —
+  // see the gpt6.ts descriptor comment.
+  const isGpt6Responses = /^gpt-6(?:[.-]|$)/.test(normalized)
+  return (isGpt56Responses || isGpt6Responses) &&
     !GPT5_MINI_NANO_RE.test(normalized)
 }
 
@@ -495,15 +528,19 @@ export function modelRequiresResponsesApi(model: string): boolean {
 // gpt-50-style ids. Shared by supportsCodexReasoningEffort and the Codex
 // profile model gate so the family shape lives in one place.
 const GPT5_FAMILY_RE = /^gpt-5(?:[.-]|$)/
+// GPT-6 family (October 2026): same Codex-backend eligibility and effort
+// support as gpt-5. Separate pattern so the 5.x boundary stays legible.
+const GPT6_FAMILY_RE = /^gpt-6(?:[.-]|$)/
 const GPT5_MINI_NANO_RE = /(?:^|[-.])(?:mini|nano)(?:[-.]|$)/
 
 // gpt-5 family models the ChatGPT Codex backend can serve. The -mini/-nano
 // tiers are API-only (never exposed through the Codex transport), so a
 // stale gpt-5-mini pick saved under a direct-OpenAI profile must fall back
 // to the Codex profile's default rather than be sent to the backend and 400.
+// Covers gpt-6 the same way (native Codex picker serves the GPT-6 family).
 export function isCodexEligibleGpt5Model(model: string): boolean {
   const base = model.trim().toLowerCase().split('?', 1)[0] ?? ''
-  return GPT5_FAMILY_RE.test(base) && !GPT5_MINI_NANO_RE.test(base)
+  return (GPT5_FAMILY_RE.test(base) || GPT6_FAMILY_RE.test(base)) && !GPT5_MINI_NANO_RE.test(base)
 }
 
 // The responses auto-route only fires for the OpenAI first-party surface
@@ -1543,5 +1580,5 @@ export function supportsCodexReasoningEffort(model: string): boolean {
     return true
   }
 
-  return GPT5_FAMILY_RE.test(base)
+  return GPT5_FAMILY_RE.test(base) || GPT6_FAMILY_RE.test(base)
 }

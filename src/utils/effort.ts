@@ -845,6 +845,18 @@ function legacyModelSupportsMaxEffort(
   if (model.toLowerCase().includes('opus-4-6') || model.toLowerCase().includes('opus-4-7') || model.toLowerCase().includes('opus-4-8')) {
     return true
   }
+  // GPT-6 flagship tiers (astra/sol/6.1-sol) serve the native-Codex Ultra
+  // tier, which maps to wire `max` (models.dev `reasoning_options` plus
+  // operator-confirmed Ultra on Sol/Astra model types, 2026-10-13; the
+  // Ultra→max mapping is a hypothesis pending live wire confirmation — see
+  // the gpt6.ts descriptor comment). Luna tops out at xhigh.
+  const gpt6Base = model.trim().toLowerCase().split('?', 1)[0] ?? ''
+  if (
+    gpt6Base === 'gpt-6-astra' || gpt6Base === 'gpt-6-sol' ||
+    gpt6Base === 'gpt-6.1-sol' || gpt6Base === 'gpt-6'
+  ) {
+    return true
+  }
   if (process.env.USER_TYPE === 'ant' && resolveAntModel(model)) {
     return true
   }
@@ -921,7 +933,15 @@ function getLegacyAvailableEffortLevels(
     m.includes('gemini-3')
   ) && getReasoningApiProvider(context) === 'openai'
   if (modelUsesOpenAIEffort(model, context) && !isOpenCodeNativeFormat) {
-    return [...OPENAI_EFFORT_LEVELS] as EffortLevel[]
+    const levels = [...OPENAI_EFFORT_LEVELS] as EffortLevel[]
+    // GPT-6 flagships append the native-Codex Ultra tier (wire `max`) to the
+    // standard OpenAI ladder; every other OpenAI-effort model keeps the
+    // 4-level ladder. No current model took this branch before GPT-6 (Opus
+    // max models resolve through the native-format path above).
+    if (legacyModelSupportsMaxEffort(model, context)) {
+      levels.push('max')
+    }
+    return levels
   }
   const levels: EffortLevel[] = ['low', 'medium', 'high']
   if (legacyModelSupportsXHighEffort(model, context)) {

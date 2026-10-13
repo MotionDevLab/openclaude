@@ -380,6 +380,13 @@ test('modelRequiresResponsesApi matches gpt-5.4/5.5/5.6 (excl. mini/nano) only',
     'gpt-5.6-terra',
     'gpt-5.6-luna',
     'GPT-5.6-SOL',
+    // GPT-6 family inherits the 5.6 responses routing
+    'gpt-6',
+    'gpt-6-astra',
+    'gpt-6.1-sol',
+    'gpt-6-sol',
+    'gpt-6-luna',
+    'GPT-6-ASTRA',
     // patch releases of a verified family stay routed
     'gpt-5.4.1',
   ]) {
@@ -402,6 +409,9 @@ test('modelRequiresResponsesApi matches gpt-5.4/5.5/5.6 (excl. mini/nano) only',
     'gpt-5.7',
     'gpt-5.8-preview',
     'gpt-5.9',
+    // gpt-60-style ids are not the gpt-6 family
+    'gpt-60',
+    'gpt-6-mini',
     'o3',
     'claude-opus-4-8',
   ]) {
@@ -431,6 +441,20 @@ test('auto-routes gpt-5.6 to responses on the default OpenAI base', () => {
     transport: 'responses',
     resolvedModel: 'gpt-5.6-sol',
     baseUrl: 'https://api.openai.com/v1',
+  })
+})
+
+test('auto-routes gpt-6-astra to responses on the default OpenAI base', () => {
+  process.env.CLAUDE_CODE_USE_OPENAI = '1'
+  process.env.OPENAI_BASE_URL = 'https://api.openai.com/v1'
+  process.env.OPENAI_MODEL = 'gpt-6-astra'
+  delete process.env.OPENAI_API_FORMAT
+
+  expect(resolveProviderRequest()).toMatchObject({
+    transport: 'responses',
+    resolvedModel: 'gpt-6-astra',
+    baseUrl: 'https://api.openai.com/v1',
+    reasoning: { effort: 'high' },
   })
 })
 

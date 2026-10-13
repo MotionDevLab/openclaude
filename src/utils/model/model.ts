@@ -698,6 +698,10 @@ export function getPublicModelDisplayName(model: ModelName): string | null {
   ) {
     // Return display names for known GitHub Copilot models
     const copilotModelNames: Record<string, string> = {
+      'gpt-6-astra': 'GPT-6 Astra',
+      'gpt-6.1-sol': 'GPT-6.1 Sol',
+      'gpt-6-sol': 'GPT-6 Sol',
+      'gpt-6-luna': 'GPT-6 Luna',
       'gpt-5.6-sol': 'GPT-5.6 Sol',
       'gpt-5.6-terra': 'GPT-5.6 Terra',
       'gpt-5.6-luna': 'GPT-5.6 Luna',
@@ -733,6 +737,14 @@ export function getPublicModelDisplayName(model: ModelName): string | null {
     return null
   }
   switch (model) {
+    case 'gpt-6-astra':
+      return 'GPT-6 Astra'
+    case 'gpt-6.1-sol':
+      return 'GPT-6.1 Sol'
+    case 'gpt-6-sol':
+      return 'GPT-6 Sol'
+    case 'gpt-6-luna':
+      return 'GPT-6 Luna'
     case 'gpt-5.6-sol':
       return 'GPT-5.6 Sol'
     case 'gpt-5.6-terra':
@@ -923,6 +935,12 @@ export function parseUserSpecifiedModel(
   if (modelString === 'gpt-5.6' || modelString.startsWith('gpt-5.6?')) {
     const query = modelString.slice('gpt-5.6'.length)
     return 'gpt-5.6-sol' + query + (has1mTag ? '[1m]' : '')
+  }
+  // Bare gpt-6 resolves to the flagship tier (Sol), like gpt-5.6 above and
+  // the Codex CLI convention. Same trailing-query/[1m] handling.
+  if (modelString === 'gpt-6' || modelString.startsWith('gpt-6?')) {
+    const query = modelString.slice('gpt-6'.length)
+    return 'gpt-6-sol' + query + (has1mTag ? '[1m]' : '')
   }
 
   // Opus 4/4.1 are no longer available on the first-party API (same as
