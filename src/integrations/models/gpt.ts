@@ -33,8 +33,11 @@ export default [
   // are combined with reasoning_effort — they must use /v1/responses. The
   // openai-vendor catalog carries their reasoning metadata; the responses
   // routing is handled by modelRequiresResponsesApi in providerConfig.
-  // Context: same conservative Codex 272k input cap as gpt-5.5 below (see
-  // that comment), despite the 1.05M API descriptor value.
+  // Context: OpenAI's own Codex metadata reports 272,000 for all three
+  // (openai/codex#33972, 2026-07-18 — corrected down from 372,000), and 272K
+  // is the 2x-pricing boundary for this family. So 272k here is the verified
+  // Codex-route number, not a stale fallback; the 1.05M API spec lives in the
+  // vendor catalog. Last cross-checked 2026-10-13.
   gptModel('gpt-5.6-sol', 'GPT-5.6 Sol', 272_000, 128_000),
   gptModel('gpt-5.6-terra', 'GPT-5.6 Terra', 272_000, 128_000),
   gptModel('gpt-5.6-luna', 'GPT-5.6 Luna', 272_000, 128_000),
@@ -44,12 +47,15 @@ export default [
   // window" mid-turn (issue #1118). Use the conservative Codex limit so
   // compaction kicks in before the request fails.
   gptModel('gpt-5.5', 'GPT-5.5', 272_000, 128_000),
+  // gpt-5.5-mini/nano have no public spec (absent from OpenRouter, models.dev,
+  // LiteLLM, and official docs as of 2026-10-13); 400k/128k below follows the
+  // 5.x mini/nano family pattern as a Codex-route best-effort.
   gptModel('gpt-5.5-mini', 'GPT-5.5 Mini', 400_000, 128_000),
   gptModel('gpt-5.5-nano', 'GPT-5.5 Nano', 400_000, 128_000),
   gptModel('gpt-5.4', 'GPT-5.4', 1_050_000, 128_000),
   gptModel('gpt-5.4-mini', 'GPT-5.4 Mini', 400_000, 128_000),
   gptModel('gpt-5.4-nano', 'GPT-5.4 Nano', 400_000, 128_000),
-  gptModel('gpt-5-mini', 'GPT-5 Mini', 400_000, 64_000),
+  gptModel('gpt-5-mini', 'GPT-5 Mini', 400_000, 128_000),
   gptModel('gpt-4.1', 'GPT-4.1', 1_047_576, 32_768),
   gptModel('gpt-4.1-mini', 'GPT-4.1 Mini', 1_047_576, 32_768),
   gptModel('gpt-4.1-nano', 'GPT-4.1 Nano', 1_047_576, 32_768),
