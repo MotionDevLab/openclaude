@@ -64,6 +64,9 @@ const zenModels: OpenCodeModelSpec[] = [
   { id: 'opencode-gpt-5.4-pro', label: 'GPT 5.4 Pro', defaultModel: 'gpt-5.4-pro', contextWindow: 1_050_000, maxOutputTokens: 128_000, reasoning: true, vision: true },
   { id: 'opencode-gpt-5.4-mini', label: 'GPT 5.4 Mini', defaultModel: 'gpt-5.4-mini', contextWindow: 400_000, maxOutputTokens: 128_000, vision: true },
   { id: 'opencode-gpt-5.4-nano', label: 'GPT 5.4 Nano', defaultModel: 'gpt-5.4-nano', contextWindow: 400_000, maxOutputTokens: 128_000 },
+  // Spark maxOutput is disputed (models.dev says 32k, LiteLLM says 128k);
+  // kept at 128k per the quarantine rule until official docs confirm.
+  // Last checked 2026-10-13.
   { id: 'opencode-gpt-5.3-codex-spark', label: 'GPT 5.3 Codex Spark', defaultModel: 'gpt-5.3-codex-spark', contextWindow: 128_000, maxOutputTokens: 128_000, coding: true },
   { id: 'opencode-gpt-5.3-codex', label: 'GPT 5.3 Codex', defaultModel: 'gpt-5.3-codex', contextWindow: 400_000, maxOutputTokens: 128_000, vision: true, coding: true },
   { id: 'opencode-gpt-5.2', label: 'GPT 5.2', defaultModel: 'gpt-5.2', contextWindow: 400_000, maxOutputTokens: 128_000, vision: true },
