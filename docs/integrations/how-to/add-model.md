@@ -228,4 +228,6 @@ Before calling a model doc update complete:
 - the doc explains that global lookup reads `src/integrations/models/`, while
   `src/utils/model/openaiContextWindows.ts` only preserves env overrides;
 - the doc explains why normal gateway/direct-vendor onboarding should not
-  require editing multiple shared model files.
+  require editing multiple shared model files;
+- limits were checked for staleness with the `model-limits-audit` skill before
+  calling the update complete.
