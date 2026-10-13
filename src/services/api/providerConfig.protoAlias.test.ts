@@ -71,6 +71,16 @@ describe('providerConfig — Codex alias lookup is prototype-safe', () => {
     expect(getReasoningEffortForModel('gpt-5.3-codex-spark')).toBeUndefined()
   })
 
+  test('getReasoningEffortForModel resolves GPT-6 family defaults', () => {
+    expect(getReasoningEffortForModel('gpt-6')).toBe('high')
+    expect(getReasoningEffortForModel('gpt-6-astra')).toBe('high')
+    expect(getReasoningEffortForModel('gpt-6.1-sol')).toBe('high')
+    expect(getReasoningEffortForModel('gpt-6-sol')).toBe('high')
+    expect(getReasoningEffortForModel('gpt-6-luna')).toBe('medium')
+    expect(supportsCodexReasoningEffort('gpt-6-astra')).toBe(true)
+    expect(supportsCodexReasoningEffort('gpt-6-luna')).toBe(true)
+  })
+
   // The descriptor parsing path (parseModelDescriptor, via resolveProviderRequest)
   // is guarded too — a proto-name model must resolve to itself, not to the
   // inherited Object constructor's (nonexistent) `.model`, which produced an

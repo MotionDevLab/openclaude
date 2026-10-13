@@ -113,3 +113,24 @@ describe('parseUserSpecifiedModel — bare gpt-5.6 resolves to Sol', () => {
     )
   })
 })
+
+// Bare gpt-6 resolves to the flagship tier (Sol), mirroring gpt-5.6 above.
+describe('parseUserSpecifiedModel — bare gpt-6 resolves to Sol', () => {
+  test('gpt-6 maps to gpt-6-sol and preserves the [1m] tag', () => {
+    expect(parseUserSpecifiedModel('gpt-6')).toBe('gpt-6-sol')
+    expect(parseUserSpecifiedModel('gpt-6[1m]')).toBe('gpt-6-sol[1m]')
+  })
+
+  test('explicit GPT-6 tier ids pass through unchanged', () => {
+    expect(parseUserSpecifiedModel('gpt-6-astra')).toBe('gpt-6-astra')
+    expect(parseUserSpecifiedModel('gpt-6.1-sol')).toBe('gpt-6.1-sol')
+    expect(parseUserSpecifiedModel('gpt-6-sol')).toBe('gpt-6-sol')
+    expect(parseUserSpecifiedModel('gpt-6-luna')).toBe('gpt-6-luna')
+  })
+
+  test('a ?reasoning= query suffix does not defeat the rewrite', () => {
+    expect(parseUserSpecifiedModel('gpt-6?reasoning=medium')).toBe(
+      'gpt-6-sol?reasoning=medium',
+    )
+  })
+})

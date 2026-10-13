@@ -1730,3 +1730,91 @@ test('explicit compat metadata wire formats are controllable and feed the reques
   expect(modelSupportsEffort('custom-deepseek-low-only')).toBe(false)
   expect(modelSupportsWireEffort('custom-deepseek-low-only')).toBe(false)
 })
+
+test('GPT-6 flagships on the ChatGPT Codex backend expose the Ultra tier as max', async () => {
+  // The Codex transport resolves to a catalog-less route, so this runs the
+  // legacy path: the standard OpenAI ladder plus `max` on the flagship
+  // tiers only (operator-confirmed Ultra on Sol/Astra, 2026-10-13).
+  const { getAvailableEffortLevels, modelSupportsEffort, resolveAppliedEffort } =
+    await importFreshEffortModule({
+      provider: 'codex',
+      supportsCodexReasoningEffort: true,
+    })
+
+  for (const model of ['gpt-6-astra', 'gpt-6-sol', 'gpt-6.1-sol']) {
+    expect(modelSupportsEffort(model)).toBe(true)
+    expect(getAvailableEffortLevels(model)).toEqual([
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+      'max',
+    ])
+    expect(resolveAppliedEffort(model, 'max')).toBe('max')
+  }
+
+  // Luna tops out at Extra High — no Ultra tier.
+  expect(modelSupportsEffort('gpt-6-luna')).toBe(true)
+  expect(getAvailableEffortLevels('gpt-6-luna')).toEqual([
+    'low',
+    'medium',
+    'high',
+    'xhigh',
+  ])
+})
+
+test('openai vendor GPT-6 catalog entries expose verified reasoning controls', async () => {
+  const openaiVendor = (await import('../integrations/vendors/openai.js')).default
+  const {
+    getAvailableEffortLevels,
+    getDefaultEffortForModel,
+    modelSupportsEffort,
+    modelSupportsWireEffort,
+    resolveAppliedEffort,
+    resolveModelReasoningControl,
+  } = await importFreshEffortModule({
+    provider: 'openai',
+    supportsCodexReasoningEffort: false,
+    routeId: 'openai',
+    catalogEntries: openaiVendor.catalog?.models ?? [],
+  })
+
+  for (const model of ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol']) {
+    expect(resolveModelReasoningControl(model)).toMatchObject({
+      supportsReasoning: true,
+      controllable: true,
+      source: 'metadata',
+      levels: ['low', 'medium', 'high', 'xhigh', 'max'],
+      defaultLevel: 'high',
+      wireFormat: 'reasoning_effort',
+    })
+    expect(modelSupportsEffort(model)).toBe(true)
+    expect(modelSupportsWireEffort(model)).toBe(true)
+    expect(getAvailableEffortLevels(model)).toEqual([
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+      'max',
+    ])
+    expect(getDefaultEffortForModel(model)).toBe('high')
+    expect(resolveAppliedEffort(model, undefined)).toBe('high')
+    expect(resolveAppliedEffort(model, 'max')).toBe('max')
+  }
+
+  expect(resolveModelReasoningControl('gpt-6-luna')).toMatchObject({
+    supportsReasoning: true,
+    controllable: true,
+    source: 'metadata',
+    levels: ['low', 'medium', 'high', 'xhigh'],
+    defaultLevel: 'medium',
+    wireFormat: 'reasoning_effort',
+  })
+  expect(getAvailableEffortLevels('gpt-6-luna')).toEqual([
+    'low',
+    'medium',
+    'high',
+    'xhigh',
+  ])
+  expect(getDefaultEffortForModel('gpt-6-luna')).toBe('medium')
+})
