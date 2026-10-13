@@ -9,11 +9,13 @@ import { saveGoalState } from '../../services/goal/persistence.js';
 import { resumeGoal } from '../../services/goal/state.js';
 import type { GoalState } from '../../services/goal/types.js';
 import type { CommandResultDisplay, ResumeEntrypoint } from '../../commands.js';
-import { LogSelector } from '../../components/LogSelector.js';
+import { DeleteSessionConfirm } from '../../components/DeleteSessionConfirm.js';
+import { LogSelector, getResumeLogDisplayTitle } from '../../components/LogSelector.js';
 import { MessageResponse } from '../../components/MessageResponse.js';
 import { SessionSummary } from '../../components/SessionSummary.js';
 import { Spinner } from '../../components/Spinner.js';
 import { useIsInsideModal } from '../../context/modalContext.js';
+import { useSessionDelete } from '../../hooks/useSessionDelete.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { setClipboard } from '../../ink/termio/osc.js';
 import { Box, Text, useInput } from '../../ink.js';
@@ -255,6 +257,23 @@ function ResumeCommand({
       display: 'system'
     });
   }
+  // Shared Del-to-delete flow (same guards/confirm/dialog as the --resume
+  // picker). The entry is dropped locally, matching ResumeConversation.
+  const sessionDelete = useSessionDelete({
+    getActiveSessionId: () => getSessionId(),
+    onDeleted: (sessionId: string) => {
+      setLogs(prev => prev.filter(l => getSessionIdFromLog(l) !== sessionId));
+      // Belt-and-braces: the picker is visible only while no session is
+      // selected, but never resume a session that was just deleted.
+      if (
+        selectedSession &&
+        getSessionIdFromLog(selectedSession.log) === sessionId
+      ) {
+        setSelectedSession(null);
+        setSessionSummary(null);
+      }
+    },
+  });
   if (loading) {
     return <Box>
         <Spinner />
@@ -273,7 +292,16 @@ function ResumeCommand({
     return <ResumeConfirmation selectedSession={selectedSession} sessionSummary={sessionSummary} resuming={resuming} onResume={handleConfirmResume} onCancel={handleCancelResume} />;
   }
 
-  return <LogSelector logs={logs} maxHeight={insideModal ? Math.floor(rows / 2) : rows - 2} onCancel={handleCancel} onSelect={handleSelect} onLogsChanged={() => loadLogs(showAllProjects, worktreePaths)} showAllProjects={showAllProjects} onToggleAllProjects={handleToggleAllProjects} onAgenticSearch={agenticSessionSearch} />;
+  const deleteBanner = sessionDelete.deleteError || sessionDelete.deleteNotice ? <Box flexDirection="column" marginTop={1}>
+      {sessionDelete.deleteError && <Text color="red">{sessionDelete.deleteError}</Text>}
+      {sessionDelete.deleteNotice && <Text>{sessionDelete.deleteNotice}</Text>}
+    </Box> : null;
+
+  return <Box flexDirection="column">
+    {sessionDelete.deletingLog && <DeleteSessionConfirm sessionTitle={getResumeLogDisplayTitle(sessionDelete.deletingLog)} sessionId={getSessionIdFromLog(sessionDelete.deletingLog) ?? ''} onConfirm={sessionDelete.handleDeleteConfirm} onCancel={sessionDelete.handleDeleteCancel} />}
+    <LogSelector logs={logs} maxHeight={insideModal ? Math.floor(rows / 2) : rows - 2} onCancel={handleCancel} onSelect={handleSelect} onDeleteRequest={sessionDelete.handleDeleteRequest} isInputDisabled={sessionDelete.isDeletePending} onLogsChanged={() => loadLogs(showAllProjects, worktreePaths)} showAllProjects={showAllProjects} onToggleAllProjects={handleToggleAllProjects} onAgenticSearch={agenticSessionSearch} />
+    {deleteBanner}
+  </Box>;
 }
 export function filterResumableSessions(logs: LogOption[], currentSessionId: string): LogOption[] {
   return logs.filter(l => !l.isSidechain && getSessionIdFromLog(l) !== currentSessionId);

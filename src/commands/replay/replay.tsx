@@ -3,10 +3,12 @@ import chalk from 'chalk';
 import type { UUID } from 'crypto';
 import * as React from 'react';
 import { getOriginalCwd, getSessionId } from '../../bootstrap/state.js';
-import { LogSelector } from '../../components/LogSelector.js';
+import { DeleteSessionConfirm } from '../../components/DeleteSessionConfirm.js';
+import { LogSelector, getResumeLogDisplayTitle } from '../../components/LogSelector.js';
 import { MessageResponse } from '../../components/MessageResponse.js';
 import { Spinner } from '../../components/Spinner.js';
 import { useIsInsideModal } from '../../context/modalContext.js';
+import { useSessionDelete } from '../../hooks/useSessionDelete.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { Box, Text } from '../../ink.js';
 import type { LocalJSXCommandCall } from '../../types/command.js';
@@ -98,6 +100,15 @@ function ReplaySessionPicker({
     onDone('Replay cancelled');
   }
 
+  const sessionDelete = useSessionDelete({
+    getActiveSessionId: () => getSessionId(),
+    onDeleted: (sessionId: string) => {
+      setLogs(prev => prev.filter(l => getSessionIdFromLog(l) !== sessionId));
+      setSelected(false);
+      setReplayIndex(null);
+    },
+  });
+
   if (loading) {
     return (
       <Box>
@@ -120,14 +131,34 @@ function ReplaySessionPicker({
     );
   }
 
+  const deleteBanner = sessionDelete.deleteError || sessionDelete.deleteNotice ? (
+    <Box flexDirection="column" marginTop={1}>
+      {sessionDelete.deleteError && <Text color="red">{sessionDelete.deleteError}</Text>}
+      {sessionDelete.deleteNotice && <Text>{sessionDelete.deleteNotice}</Text>}
+    </Box>
+  ) : null;
+
   return (
-    <LogSelector
-      logs={logs}
-      maxHeight={insideModal ? Math.floor(rows / 2) : rows - 2}
-      onCancel={handleCancel}
-      onSelect={handleSelect}
-      onLogsChanged={() => {}}
-    />
+    <Box flexDirection="column">
+      {sessionDelete.deletingLog && (
+        <DeleteSessionConfirm
+          sessionTitle={getResumeLogDisplayTitle(sessionDelete.deletingLog)}
+          sessionId={getSessionIdFromLog(sessionDelete.deletingLog) ?? ''}
+          onConfirm={sessionDelete.handleDeleteConfirm}
+          onCancel={sessionDelete.handleDeleteCancel}
+        />
+      )}
+      <LogSelector
+        logs={logs}
+        maxHeight={insideModal ? Math.floor(rows / 2) : rows - 2}
+        onCancel={handleCancel}
+        onSelect={handleSelect}
+        onDeleteRequest={sessionDelete.handleDeleteRequest}
+        isInputDisabled={sessionDelete.isDeletePending}
+        onLogsChanged={() => {}}
+      />
+      {deleteBanner}
+    </Box>
   );
 }
 
