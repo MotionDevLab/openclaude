@@ -3,6 +3,7 @@ import * as React from 'react'
 import { getOriginalCwd, getSessionId } from '../../bootstrap/state.js'
 import { Select } from '../../components/CustomSelect/index.js'
 import { Dialog } from '../../components/design-system/Dialog.js'
+import { useTerminalSize } from '../../hooks/useTerminalSize.js'
 import { Box, Text, useInput } from '../../ink.js'
 import type {
   LocalJSXCommandCall,
@@ -10,7 +11,7 @@ import type {
   ResumeEntrypoint,
 } from '../../types/command.js'
 import type { LogOption } from '../../types/logs.js'
-import { formatLogMetadata } from '../../utils/format.js'
+import { formatLogMetadata, truncateToWidth } from '../../utils/format.js'
 import { getWorktreePaths } from '../../utils/getWorktreePaths.js'
 import { getLogDisplayTitle, logError } from '../../utils/log.js'
 import { deleteSessionFiles } from '../../utils/sessionDeletion.js'
@@ -38,7 +39,7 @@ type OnResume = (
 ) => Promise<void>
 
 const SESSIONS_LIST_HINT =
-  '↑/↓ navigate · Enter options · d d delete · Esc close'
+  '↑/↓ navigate · Enter options · Del or d delete (press twice to confirm) · Esc close'
 
 /** Stable React key and focus id for a saved conversation row. */
 function sessionKey(log: LogOption): string {
@@ -47,7 +48,7 @@ function sessionKey(log: LogOption): string {
 
 /**
  * `/sessions`: list this repo's saved conversations, open one to resume or
- * delete it, and go back without leaving the command. `d` pressed twice on
+ * delete it, and go back without leaving the command. `d` or Delete pressed twice on
  * a row deletes it directly (#2223); Ctrl+D stays the global exit key.
  */
 function SessionsManager({
@@ -63,8 +64,7 @@ function SessionsManager({
   const [pendingDeleteKey, setPendingDeleteKey] = React.useState<string | null>(null)
   const [notice, setNotice] = React.useState<Notice | null>(null)
   const [busy, setBusy] = React.useState(false)
-  // Remounts the list so it picks up a new default focus after a reload.
-  const [listVersion, setListVersion] = React.useState(0)
+  const { columns, rows } = useTerminalSize()
 
   const loadLogs = React.useCallback(async (): Promise<LogOption[]> => {
     const paths = await getWorktreePaths(getOriginalCwd())
@@ -95,14 +95,12 @@ function SessionsManager({
   const backToList = (log?: LogOption) => {
     if (log) setFocusedKey(sessionKey(log))
     setView({ kind: 'list' })
-    setListVersion(v => v + 1)
   }
 
   const deleteLog = async (log: LogOption) => {
     if (!logs) return
     setPendingDeleteKey(null)
     setBusy(true)
-    const index = logs.findIndex(l => sessionKey(l) === sessionKey(log))
     const sessionId = getSessionIdFromLog(log) ?? ''
     const title = getLogDisplayTitle(log)
     try {
@@ -116,17 +114,16 @@ function SessionsManager({
         backToList(log)
         return
       }
-      const remaining = await loadLogs()
+      // Drop the entry locally like the resume picker delete flow: no disk
+      // reload and no list remount, so the TUI keeps focus after deletion.
+      const remaining = logs.filter(l => sessionKey(l) !== sessionKey(log))
       if (remaining.length === 0) {
         onDone(`Deleted "${title}". No saved conversations left.`, { display: 'system' })
         return
       }
       setLogs(remaining)
-      // Keep focus on the same row position rather than jumping elsewhere.
-      setFocusedKey(sessionKey(remaining[Math.min(Math.max(index, 0), remaining.length - 1)]!))
       setNotice({ text: `Deleted "${title}".` })
       setView({ kind: 'list' })
-      setListVersion(v => v + 1)
     } catch (error) {
       logError(error as Error)
       setNotice({ text: `Failed to delete "${title}": ${(error as Error).message}`, error: true })
@@ -168,7 +165,9 @@ function SessionsManager({
     (input, key) => {
       if (!logs || key.ctrl || key.meta) return
       const focused = logs.find(l => sessionKey(l) === focusedKey)
-      if (input === 'd' && focused) {
+      // Fork picker parity: LogSelector fires onDeleteRequest from key.delete,
+      // so the second press may be Delete or d.
+      if ((input === 'd' || key.delete) && focused) {
         if (pendingDeleteKey === sessionKey(focused)) {
           void deleteLog(focused)
         } else {
@@ -189,6 +188,22 @@ function SessionsManager({
     return <Text dimColor>Loading conversations…</Text>
   }
 
+  // List rendering follows the resume picker (LogSelector) flat path: each
+  // option takes a label row, a metadata row, and a blank separator row (3
+  // rows), so the window is sized in rows, not options. The compact
+  // two-column default this list used before renders label and metadata
+  // side by side in a single row, a layout none of the working pickers use.
+  const ROWS_PER_OPTION = 3
+  const LIST_CHROME_ROWS = 12
+  const visibleOptionCount = Math.max(
+    1,
+    Math.min(logs.length, Math.floor((rows - LIST_CHROME_ROWS) / ROWS_PER_OPTION)),
+  )
+  // Mirror the picker label shaping: collapse whitespace and truncate to the
+  // terminal width so every option keeps its exact one-label-row shape.
+  const maxLabelWidth = Math.max(30, columns - 4)
+  const toListLabel = (log: LogOption): string =>
+    truncateToWidth(getLogDisplayTitle(log).replace(/\s+/g, ' ').trim(), maxLabelWidth)
   const noticeLine = notice ? (
     <Text color={notice.error ? 'error' : 'warning'}>{notice.text}</Text>
   ) : null
@@ -258,11 +273,13 @@ function SessionsManager({
       <Box flexDirection="column">
         {noticeLine}
         <Select
-          key={listVersion}
+          layout="expanded"
+          visibleOptionCount={visibleOptionCount}
           options={logs.map(log => ({
-            label: getLogDisplayTitle(log),
+            label: toListLabel(log),
             value: sessionKey(log),
             description: formatLogMetadata(log),
+            dimDescription: true,
             color: pendingDeleteKey === sessionKey(log) ? 'error' : undefined,
           }))}
           defaultFocusValue={focusedKey}
