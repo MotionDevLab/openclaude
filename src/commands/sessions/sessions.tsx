@@ -3,6 +3,7 @@ import * as React from 'react'
 import { getOriginalCwd, getSessionId } from '../../bootstrap/state.js'
 import { Select } from '../../components/CustomSelect/index.js'
 import { Dialog } from '../../components/design-system/Dialog.js'
+import { useTerminalSize } from '../../hooks/useTerminalSize.js'
 import { Box, Text, useInput } from '../../ink.js'
 import type {
   LocalJSXCommandCall,
@@ -63,8 +64,7 @@ function SessionsManager({
   const [pendingDeleteKey, setPendingDeleteKey] = React.useState<string | null>(null)
   const [notice, setNotice] = React.useState<Notice | null>(null)
   const [busy, setBusy] = React.useState(false)
-  // Remounts the list so it picks up a new default focus after a reload.
-  const [listVersion, setListVersion] = React.useState(0)
+  const { rows } = useTerminalSize()
 
   const loadLogs = React.useCallback(async (): Promise<LogOption[]> => {
     const paths = await getWorktreePaths(getOriginalCwd())
@@ -95,14 +95,12 @@ function SessionsManager({
   const backToList = (log?: LogOption) => {
     if (log) setFocusedKey(sessionKey(log))
     setView({ kind: 'list' })
-    setListVersion(v => v + 1)
   }
 
   const deleteLog = async (log: LogOption) => {
     if (!logs) return
     setPendingDeleteKey(null)
     setBusy(true)
-    const index = logs.findIndex(l => sessionKey(l) === sessionKey(log))
     const sessionId = getSessionIdFromLog(log) ?? ''
     const title = getLogDisplayTitle(log)
     try {
@@ -116,17 +114,16 @@ function SessionsManager({
         backToList(log)
         return
       }
-      const remaining = await loadLogs()
+      // Drop the entry locally like the resume picker delete flow: no disk
+      // reload and no list remount, so the TUI keeps focus after deletion.
+      const remaining = logs.filter(l => sessionKey(l) !== sessionKey(log))
       if (remaining.length === 0) {
         onDone(`Deleted "${title}". No saved conversations left.`, { display: 'system' })
         return
       }
       setLogs(remaining)
-      // Keep focus on the same row position rather than jumping elsewhere.
-      setFocusedKey(sessionKey(remaining[Math.min(Math.max(index, 0), remaining.length - 1)]!))
       setNotice({ text: `Deleted "${title}".` })
       setView({ kind: 'list' })
-      setListVersion(v => v + 1)
     } catch (error) {
       logError(error as Error)
       setNotice({ text: `Failed to delete "${title}": ${(error as Error).message}`, error: true })
@@ -189,6 +186,9 @@ function SessionsManager({
     return <Text dimColor>Loading conversations…</Text>
   }
 
+  // Size the visible window to the terminal like the resume picker does.
+  // A fixed 5-row window under the Dialog chrome starves short terminals.
+  const visibleOptionCount = Math.max(1, Math.min(logs.length, rows - 9))
   const noticeLine = notice ? (
     <Text color={notice.error ? 'error' : 'warning'}>{notice.text}</Text>
   ) : null
@@ -258,7 +258,7 @@ function SessionsManager({
       <Box flexDirection="column">
         {noticeLine}
         <Select
-          key={listVersion}
+          visibleOptionCount={visibleOptionCount}
           options={logs.map(log => ({
             label: getLogDisplayTitle(log),
             value: sessionKey(log),
