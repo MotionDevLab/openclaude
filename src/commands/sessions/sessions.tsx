@@ -11,7 +11,7 @@ import type {
   ResumeEntrypoint,
 } from '../../types/command.js'
 import type { LogOption } from '../../types/logs.js'
-import { formatLogMetadata } from '../../utils/format.js'
+import { formatLogMetadata, truncateToWidth } from '../../utils/format.js'
 import { getWorktreePaths } from '../../utils/getWorktreePaths.js'
 import { getLogDisplayTitle, logError } from '../../utils/log.js'
 import { deleteSessionFiles } from '../../utils/sessionDeletion.js'
@@ -64,7 +64,7 @@ function SessionsManager({
   const [pendingDeleteKey, setPendingDeleteKey] = React.useState<string | null>(null)
   const [notice, setNotice] = React.useState<Notice | null>(null)
   const [busy, setBusy] = React.useState(false)
-  const { rows } = useTerminalSize()
+  const { columns, rows } = useTerminalSize()
 
   const loadLogs = React.useCallback(async (): Promise<LogOption[]> => {
     const paths = await getWorktreePaths(getOriginalCwd())
@@ -186,9 +186,22 @@ function SessionsManager({
     return <Text dimColor>Loading conversations…</Text>
   }
 
-  // Size the visible window to the terminal like the resume picker does.
-  // A fixed 5-row window under the Dialog chrome starves short terminals.
-  const visibleOptionCount = Math.max(1, Math.min(logs.length, rows - 9))
+  // List rendering follows the resume picker (LogSelector) flat path: each
+  // option takes a label row, a metadata row, and a blank separator row (3
+  // rows), so the window is sized in rows, not options. The compact
+  // two-column default this list used before renders label and metadata
+  // side by side in a single row, a layout none of the working pickers use.
+  const ROWS_PER_OPTION = 3
+  const LIST_CHROME_ROWS = 12
+  const visibleOptionCount = Math.max(
+    1,
+    Math.min(logs.length, Math.floor((rows - LIST_CHROME_ROWS) / ROWS_PER_OPTION)),
+  )
+  // Mirror the picker label shaping: collapse whitespace and truncate to the
+  // terminal width so every option keeps its exact one-label-row shape.
+  const maxLabelWidth = Math.max(30, columns - 4)
+  const toListLabel = (log: LogOption): string =>
+    truncateToWidth(getLogDisplayTitle(log).replace(/\s+/g, ' ').trim(), maxLabelWidth)
   const noticeLine = notice ? (
     <Text color={notice.error ? 'error' : 'warning'}>{notice.text}</Text>
   ) : null
@@ -258,11 +271,13 @@ function SessionsManager({
       <Box flexDirection="column">
         {noticeLine}
         <Select
+          layout="expanded"
           visibleOptionCount={visibleOptionCount}
           options={logs.map(log => ({
-            label: getLogDisplayTitle(log),
+            label: toListLabel(log),
             value: sessionKey(log),
             description: formatLogMetadata(log),
+            dimDescription: true,
             color: pendingDeleteKey === sessionKey(log) ? 'error' : undefined,
           }))}
           defaultFocusValue={focusedKey}
