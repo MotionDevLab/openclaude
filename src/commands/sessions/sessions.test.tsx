@@ -172,7 +172,8 @@ describe('/sessions', () => {
     const frame = await mounted.waitFor(f => f.includes('Sessions (3)'))
     expect(frame).toContain('alpha task')
     expect(frame).toContain('gamma task')
-    expect(frame).toContain('d d delete')
+    // Fork UX convergence (round 3): hint now names both delete keys explicitly.
+    expect(frame).toContain('Del or d delete')
     expect(frame).toContain('Esc close')
   })
 

@@ -39,7 +39,7 @@ type OnResume = (
 ) => Promise<void>
 
 const SESSIONS_LIST_HINT =
-  '↑/↓ navigate · Enter options · d d delete · Esc close'
+  '↑/↓ navigate · Enter options · Del or d delete (press twice to confirm) · Esc close'
 
 /** Stable React key and focus id for a saved conversation row. */
 function sessionKey(log: LogOption): string {
@@ -48,7 +48,7 @@ function sessionKey(log: LogOption): string {
 
 /**
  * `/sessions`: list this repo's saved conversations, open one to resume or
- * delete it, and go back without leaving the command. `d` pressed twice on
+ * delete it, and go back without leaving the command. `d` or Delete pressed twice on
  * a row deletes it directly (#2223); Ctrl+D stays the global exit key.
  */
 function SessionsManager({
@@ -165,7 +165,9 @@ function SessionsManager({
     (input, key) => {
       if (!logs || key.ctrl || key.meta) return
       const focused = logs.find(l => sessionKey(l) === focusedKey)
-      if (input === 'd' && focused) {
+      // Fork picker parity: LogSelector fires onDeleteRequest from key.delete,
+      // so the second press may be Delete or d.
+      if ((input === 'd' || key.delete) && focused) {
         if (pendingDeleteKey === sessionKey(focused)) {
           void deleteLog(focused)
         } else {
