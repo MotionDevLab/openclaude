@@ -162,6 +162,7 @@ function readCommandProcessStartId(
   command: string,
   args: string[],
   prefix: string,
+  timeoutMs = 1_000,
 ): string | null {
   try {
     const result = spawnSync(command, args, {
@@ -172,7 +173,7 @@ function readCommandProcessStartId(
         LC_ALL: 'C',
         TZ: 'UTC',
       },
-      timeout: 1_000,
+      timeout: timeoutMs,
       windowsHide: true,
     })
     if (result.error || result.status !== 0) return null
@@ -197,6 +198,8 @@ function readProcessStartId(pid: number): string | null {
         `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks`,
       ],
       'windows',
+      // PowerShell startup alone can exceed one second on Windows.
+      5_000,
     )
   }
   return readCommandProcessStartId(

@@ -322,6 +322,35 @@ test('creates a missing settings file without weakening the synchronous result',
   })
 })
 
+test('persists effort changes without replacing provider settings', async () => {
+  await withIsolatedUserSettings((_root, settingsPath) => {
+    const settings = {
+      model: 'example-large-model',
+      providerEnvFile: '~/.openclaude/providers/example.env',
+      effortLevel: 'medium',
+      customProviders: [
+        {
+          id: 'example-router',
+          label: 'Example Router',
+          baseUrl: 'http://127.0.0.1:8080/v1',
+          models: ['example-large-model'],
+          smallModel: 'example-large-model',
+        },
+      ],
+    }
+    writeFileSync(settingsPath, `${JSON.stringify(settings)}\n`)
+
+    expect(
+      updateSettingsForSource('userSettings', { effortLevel: 'high' }),
+    ).toEqual({ error: null })
+    expect(JSON.parse(readFileSync(settingsPath, 'utf8'))).toEqual({
+      ...settings,
+      effortLevel: 'high',
+    })
+    expect(existsSync(`${settingsPath}.lock`)).toBe(false)
+  })
+})
+
 test('preserves deletion, array replacement, and ordinary success semantics', async () => {
   await withIsolatedUserSettings((_root, settingsPath) => {
     writeFileSync(
